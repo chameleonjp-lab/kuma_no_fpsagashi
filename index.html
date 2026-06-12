@@ -1667,18 +1667,63 @@ const G = {
   run:        null,
 };
 
-/** ゲーム進行の glue 層（CORE呼び出し＋画面更新。P3以降が実装） */
+/** ゲーム進行の glue 層（CORE呼び出し＋画面更新・描画ループ） */
 const Game = {
-  /** 新規プレイ開始（P3以降が実装） */
+  /** requestAnimationFrame の多重起動防止フラグ */
+  _looping: false,
+
+  /**
+   * 新規プレイを開始する。
+   * Core.newRun で run を生成し、初期視界を explored へ反映、ログ初期化、HUD更新、描画ループ開始。
+   */
   newRun() {
-    // P3で実装
+    G.run = Core.newRun(G.playerName);
+    Game.updateVision();
+    Log.clear();
+    Log.add('ダンジョン B1F にやってきた');
+    Hud.update(G.run);
+    Game.startLoop();
+  },
+
+  /**
+   * 現在の視界を踏破フラグへマージする共通ヘルパ（P4が移動毎に呼ぶ）。
+   * 視界内の各タイルを explored=true にし、階段タイルが視界に入れば stairsSeen=true。
+   */
+  updateVision() {
+    const run = G.run;
+    if (!run) return;
+    const vis = Core.computeVisible(run);
+    for (const k of vis) {
+      const ci = k.indexOf(',');
+      const x = +k.slice(0, ci), y = +k.slice(ci + 1);
+      if (y >= 0 && y < CONFIG.MAP_H && x >= 0 && x < CONFIG.MAP_W) run.explored[y][x] = true;
+    }
+    if (vis.has(run.stairs.x + ',' + run.stairs.y)) run.stairsSeen = true;
+  },
+
+  /**
+   * 描画ループを開始する（多重起動しない）。
+   * G.screen==='game' かつ G.run があるフレームだけ draw / drawMini する。
+   */
+  startLoop() {
+    if (Game._looping) return;
+    Game._looping = true;
+    const tick = () => {
+      if (G.screen === 'game' && G.run) {
+        Render.draw(G.run);
+        Render.drawMini(G.run);
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
   },
 };
 
 // ==== SECTION: RENDER ====
 /**
- * Canvasのリサイズと黒塗り（P2分）。
- * ゲームロジックへの依存なし。
+ * Canvas描画（メイン盤面＋ミニマップ）。タイル1辺 CONFIG.TILE 論理px。
+ * 可視判定は Core.computeVisible、踏破は run.explored を参照する。
+ * 描画はCanvasプリミティブ＋絵文字のみ（外部アセットなし）。
  */
 const Render = (() => {
   const gameCanvas  = document.getElementById('gameCanvas');
@@ -1686,20 +1731,45 @@ const Render = (() => {
   const canvasWrap  = document.getElementById('canvasWrap');
   let   gameCtx     = gameCanvas.getContext('2d');
   let   miniCtx     = miniCanvas.getContext('2d');
+  // 論理サイズ（CSSピクセル）。resizeで更新し、draw内のカメラ計算に使う
+  let   viewW = canvasWrap.clientWidth;
+  let   viewH = canvasWrap.clientHeight;
 
-  /** ゲームキャンバスをcanvasWrap実サイズ×DPRでリサイズして黒塗り */
+  const TILE = CONFIG.TILE;     // 32
+  const W = CONFIG.MAP_W, H = CONFIG.MAP_H;
+
+  // 配色（レトロ・暖色ダンジョン）
+  const COL = {
+    roomFloorA: '#5a3d22', roomFloorB: '#674728',  // 部屋床（2色チェッカー）
+    corridor:   '#3a2814',                          // 通路床（暗い土色）
+    wallTop:    '#7a5a30', wallSide: '#4a3318', wallEdge: '#2a1c0c', // 岩ブロック
+    stair:      '#d9c060', stairDark: '#8a7530', stairHole: '#120c04',
+  };
+
+  /** 暗色化（踏破済み・視界外）：rgbを factor 倍 */
+  function dim(hex, factor) {
+    const n = parseInt(hex.slice(1), 16);
+    const r = Math.round(((n >> 16) & 255) * factor);
+    const g = Math.round(((n >> 8) & 255) * factor);
+    const b = Math.round((n & 255) * factor);
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+
+  /** ゲームキャンバスをcanvasWrap実サイズ×DPRでリサイズ */
   function resizeGame() {
     const dpr = window.devicePixelRatio || 1;
     const w   = canvasWrap.clientWidth;
     const h   = canvasWrap.clientHeight;
     if (w <= 0 || h <= 0) return;
+    viewW = w; viewH = h;
     gameCanvas.width  = Math.round(w * dpr);
     gameCanvas.height = Math.round(h * dpr);
     gameCtx = gameCanvas.getContext('2d');
     gameCtx.scale(dpr, dpr);
-    // P2: 黒塗りのみ
     gameCtx.fillStyle = '#000';
     gameCtx.fillRect(0, 0, w, h);
+    // run がある間はリサイズ直後に1枚描く（ループ未到達でも黒残りを避ける）
+    if (G.run && G.screen === 'game') draw(G.run);
   }
 
   /** ミニキャンバスを黒塗り（固定96×60） */
@@ -1714,7 +1784,239 @@ const Render = (() => {
     paintMini();
   }
 
-  return { resize, gameCtx: () => gameCtx, miniCtx: () => miniCtx };
+  /** 1タイル分の床を描く（room=true で部屋床のチェッカー、false で通路土色） */
+  function drawFloor(ctx, sx, sy, x, y, room, factor) {
+    if (room) {
+      const base = ((x + y) & 1) === 0 ? COL.roomFloorA : COL.roomFloorB;
+      ctx.fillStyle = factor < 1 ? dim(base, factor) : base;
+      ctx.fillRect(sx, sy, TILE, TILE);
+      // 2pxドット風テクスチャ（明暗のチェッカーを薄く重ねる）
+      const dot = ((x + y) & 1) === 0 ? COL.roomFloorB : COL.roomFloorA;
+      ctx.fillStyle = factor < 1 ? dim(dot, factor) : dot;
+      for (let py = 0; py < TILE; py += 8) {
+        for (let px = (py % 16 === 0 ? 0 : 4); px < TILE; px += 8) {
+          ctx.fillRect(sx + px, sy + py, 2, 2);
+        }
+      }
+    } else {
+      const base = COL.corridor;
+      ctx.fillStyle = factor < 1 ? dim(base, factor) : base;
+      ctx.fillRect(sx, sy, TILE, TILE);
+    }
+  }
+
+  /** 岩ブロック風の壁（踏破済み床に隣接するものだけ呼ばれる） */
+  function drawWall(ctx, sx, sy, factor) {
+    const top = factor < 1 ? dim(COL.wallTop, factor) : COL.wallTop;
+    const side = factor < 1 ? dim(COL.wallSide, factor) : COL.wallSide;
+    const edge = factor < 1 ? dim(COL.wallEdge, factor) : COL.wallEdge;
+    ctx.fillStyle = side;
+    ctx.fillRect(sx, sy, TILE, TILE);
+    // 上面を明るく（立体感）
+    ctx.fillStyle = top;
+    ctx.fillRect(sx + 2, sy + 2, TILE - 4, TILE - 8);
+    // 縁取り
+    ctx.fillStyle = edge;
+    ctx.fillRect(sx, sy, TILE, 2);
+    ctx.fillRect(sx, sy + TILE - 2, TILE, 2);
+    ctx.fillRect(sx, sy, 2, TILE);
+    ctx.fillRect(sx + TILE - 2, sy, 2, TILE);
+  }
+
+  /** 下り階段（ドット風・3段の矩形＋暗い開口部） */
+  function drawStair(ctx, sx, sy, factor) {
+    const light = factor < 1 ? dim(COL.stair, factor) : COL.stair;
+    const dark = factor < 1 ? dim(COL.stairDark, factor) : COL.stairDark;
+    const hole = factor < 1 ? dim(COL.stairHole, factor) : COL.stairHole;
+    // 開口部
+    ctx.fillStyle = hole;
+    ctx.fillRect(sx + 4, sy + 4, TILE - 8, TILE - 8);
+    // 下り3段（手前ほど明るい）
+    for (let i = 0; i < 3; i++) {
+      const stepY = sy + 6 + i * 7;
+      ctx.fillStyle = i === 2 ? light : dark;
+      ctx.fillRect(sx + 6 + i * 2, stepY, TILE - 12 - i * 4, 5);
+    }
+  }
+
+  /** 視界内タイルに絵文字を中央描画 */
+  function drawEmoji(ctx, emoji, cx, cy) {
+    ctx.fillText(emoji, cx, cy + 1);
+  }
+
+  /**
+   * メインキャンバス描画。カメラはプレイヤータイル中心が画面中央（クランプなし）。
+   * @param {object} run
+   */
+  function draw(run) {
+    const ctx = gameCtx;
+    const p = run.player;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, viewW, viewH);
+
+    // カメラ原点（このタイルの左上が描かれる画面座標）
+    // プレイヤータイル中心 (p.x+0.5, p.y+0.5)*TILE を画面中央に置く
+    const camX = (p.x + 0.5) * TILE - viewW / 2;
+    const camY = (p.y + 0.5) * TILE - viewH / 2;
+
+    const visible = Core.computeVisible(run);
+    const isVis = (x, y) => visible.has(x + ',' + y);
+
+    // 画面に映るタイル範囲だけ走査
+    const x0 = Math.max(0, Math.floor(camX / TILE));
+    const y0 = Math.max(0, Math.floor(camY / TILE));
+    const x1 = Math.min(W - 1, Math.floor((camX + viewW) / TILE));
+    const y1 = Math.min(H - 1, Math.floor((camY + viewH) / TILE));
+
+    const tiles = run.map.tiles;
+    const DIM = 0.5; // 踏破済み・視界外の減光率
+
+    // --- 床・壁・階段（タイル層） ---
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const sx = Math.round(x * TILE - camX);
+        const sy = Math.round(y * TILE - camY);
+        const t = tiles[y][x];
+        const seen = run.explored[y][x];
+        const vis = isVis(x, y);
+        if (!seen && !vis) continue;           // 未踏破かつ視界外＝黒のまま
+        const factor = vis ? 1 : DIM;          // 視界内=通常／踏破済み視界外=減光
+
+        if (t === 1 || t === 2) {
+          // 床（階段タイルなら床の上に階段を重ねる）
+          drawFloor(ctx, sx, sy, x, y, t === 1, factor);
+          if (run.stairsSeen && x === run.stairs.x && y === run.stairs.y) {
+            drawStair(ctx, sx, sy, factor);
+          }
+        } else {
+          // 壁：踏破済み床に隣接する壁だけ岩ブロック描画（それ以外は黒）
+          if (wallTouchesSeenFloor(run, x, y)) drawWall(ctx, sx, sy, factor);
+        }
+      }
+    }
+
+    // --- エンティティ（視界内のみ）：罠→アイテム→敵→プレイヤー ---
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '26px serif';
+
+    // 罠（revealed のみ）
+    for (const tr of run.traps) {
+      if (!tr.revealed || !isVis(tr.x, tr.y)) continue;
+      const cx = Math.round(tr.x * TILE - camX + TILE / 2);
+      const cy = Math.round(tr.y * TILE - camY + TILE / 2);
+      drawEmoji(ctx, DATA.TRAPS[tr.kind].emoji, cx, cy);
+    }
+    // アイテム
+    for (const it of run.items) {
+      if (!isVis(it.x, it.y)) continue;
+      const cx = Math.round(it.x * TILE - camX + TILE / 2);
+      const cy = Math.round(it.y * TILE - camY + TILE / 2);
+      drawEmoji(ctx, DATA.ITEMS[it.kind].emoji, cx, cy);
+    }
+    // 敵
+    for (const e of run.enemies) {
+      if (!isVis(e.x, e.y)) continue;
+      const cx = Math.round(e.x * TILE - camX + TILE / 2);
+      const cy = Math.round(e.y * TILE - camY + TILE / 2);
+      drawEmoji(ctx, DATA.ENEMIES[e.kind].emoji, cx, cy);
+    }
+    // プレイヤー（常に最前面・画面中央）
+    const pcx = Math.round(p.x * TILE - camX + TILE / 2);
+    const pcy = Math.round(p.y * TILE - camY + TILE / 2);
+    drawEmoji(ctx, DATA.PLAYER_EMOJI, pcx, pcy);
+
+    // --- 吹き出し（独り言。文言制御はP6・ここは描画のみ） ---
+    if (run.bubbleText) drawBubble(ctx, run.bubbleText, pcx, pcy - TILE / 2);
+  }
+
+  /** その壁タイルが踏破済みの床(1/2)に8近傍で隣接していれば true */
+  function wallTouchesSeenFloor(run, x, y) {
+    const tiles = run.map.tiles;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        if (tiles[ny][nx] !== 0 && run.explored[ny][nx]) return true;
+      }
+    }
+    return false;
+  }
+
+  /** プレイヤー頭上の吹き出し（白背景・黒文字・しっぽ。画面端は内側へクランプ） */
+  function drawBubble(ctx, text, cx, topY) {
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const padX = 8, padY = 5, tail = 7;
+    const tw = ctx.measureText(text).width;
+    const bw = tw + padX * 2;
+    const bh = 14 + padY * 2;
+    let bx = cx - bw / 2;
+    let by = topY - bh - tail;
+    // 画面内へクランプ
+    bx = Math.max(4, Math.min(viewW - bw - 4, bx));
+    by = Math.max(4, by);
+    // 角丸風矩形
+    ctx.fillStyle = '#f8f4e8';
+    roundRect(ctx, bx, by, bw, bh, 6);
+    ctx.fill();
+    // しっぽ（プレイヤー方向へ三角。吹き出しの下辺から）
+    const tailX = Math.max(bx + 8, Math.min(bx + bw - 8, cx));
+    ctx.beginPath();
+    ctx.moveTo(tailX - 5, by + bh);
+    ctx.lineTo(tailX + 5, by + bh);
+    ctx.lineTo(tailX, by + bh + tail);
+    ctx.closePath();
+    ctx.fill();
+    // 文字
+    ctx.fillStyle = '#1a120a';
+    ctx.fillText(text, bx + padX, by + bh / 2);
+  }
+
+  /** 角丸矩形パス */
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  /**
+   * ミニマップ描画（96×60・3px/タイル）。踏破済みのみ・敵/アイテムは出さない（§6.2）。
+   * @param {object} run
+   */
+  function drawMini(run) {
+    const ctx = miniCtx;
+    const S = 3; // 1タイル3px（32*3=96, 20*3=60）
+    ctx.fillStyle = 'rgba(0,0,0,0)';
+    ctx.clearRect(0, 0, miniCanvas.width, miniCanvas.height);
+    const tiles = run.map.tiles;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (!run.explored[y][x]) continue;
+        const t = tiles[y][x];
+        if (t === 1)      ctx.fillStyle = '#c89858'; // 部屋床=明るめ
+        else if (t === 2) ctx.fillStyle = '#5a4020'; // 通路=暗め
+        else continue;                               // 壁は描かない
+        ctx.fillRect(x * S, y * S, S, S);
+      }
+    }
+    // 階段（踏破済みのみ・金色）
+    if (run.stairsSeen) {
+      ctx.fillStyle = '#e6b800';
+      ctx.fillRect(run.stairs.x * S, run.stairs.y * S, S, S);
+    }
+    // プレイヤー（白2×3px）
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(run.player.x * S, run.player.y * S, 2, 3);
+  }
+
+  return { resize, draw, drawMini };
 })();
 
 // ==== SECTION: HUD-LOG ====
@@ -1756,6 +2058,34 @@ const Log = (() => {
   }
 
   return { add, clear };
+})();
+
+/**
+ * HUD（常時表示）更新。階・レベル・HP（数値＋バー）・満腹度を反映する（§10）。
+ */
+const Hud = (() => {
+  const elFloor   = document.getElementById('hudFloor');
+  const elLv      = document.getElementById('hudLv');
+  const elHp      = document.getElementById('hudHp');
+  const elHpFill  = document.querySelector('#hudHpBar .hp-fill');
+  const elSatiety = document.getElementById('hudSatiety');
+
+  /**
+   * run の現在値で HUD を更新する。
+   * @param {object} run
+   */
+  function update(run) {
+    if (!run) return;
+    const p = run.player;
+    elFloor.textContent   = run.floor;
+    elLv.textContent      = p.lv;
+    elHp.textContent      = p.hp + '/' + p.maxHp;
+    const pct = p.maxHp > 0 ? Math.max(0, Math.min(100, (p.hp / p.maxHp) * 100)) : 0;
+    elHpFill.style.width  = pct + '%';
+    elSatiety.textContent = p.satiety;
+  }
+
+  return { update };
 })();
 
 // ==== SECTION: INPUT ====
