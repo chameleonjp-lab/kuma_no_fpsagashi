@@ -1,0 +1,1583 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>熊のFP探し</title>
+<style>
+/* ==== グローバルリセット・ベース ==== */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --clr-bg:      #1a120a;
+  --clr-surface: #2b1d0e;
+  --clr-panel:   #3a2612;
+  --clr-border:  #6b4a22;
+  --clr-accent:  #c8860a;
+  --clr-gold:    #e6b800;
+  --clr-green:   #3a7a2a;
+  --clr-red:     #a03020;
+  --clr-text:    #e8d8b0;
+  --clr-muted:   #9a8060;
+  --clr-hp:      #d04040;
+  --clr-hp-bg:   #5a1010;
+  --clr-btn:     #4a2e10;
+  --clr-btn-h:   #6b4220;
+  --clr-btn-act: #8a5818;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--clr-bg);
+  color: var(--clr-text);
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 14px;
+  -webkit-text-size-adjust: 100%;
+  /* ゲーム全体の選択・タッチ抑止 */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* 100dvh（対応端末）/ 100vh（フォールバック）*/
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* アプリ全体を最大480px幅で中央寄せ */
+#appRoot {
+  width: 100%;
+  max-width: 480px;
+  height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ==== 画面共通 ==== */
+.screen {
+  display: none;
+  flex-direction: column;
+  width: 100%;
+  flex: 1;
+  overflow: hidden;
+}
+
+.screen.active {
+  display: flex;
+}
+
+/* ==== ホーム画面 ==== */
+#screenHome {
+  justify-content: center;
+  align-items: center;
+  background: var(--clr-bg);
+  padding: 24px 20px;
+  gap: 20px;
+  overflow-y: auto;
+}
+
+/* タイトルロゴ（CSSのみでドット絵風・レトロ装飾） */
+.title-logo {
+  text-align: center;
+  padding: 12px 16px;
+  border: 4px solid var(--clr-gold);
+  border-radius: 0;
+  box-shadow:
+    inset 0 0 0 2px var(--clr-bg),
+    0 0 0 2px var(--clr-accent),
+    4px 4px 0 #000;
+  background: var(--clr-surface);
+  position: relative;
+}
+
+.title-logo::before {
+  content: '★ ★ ★';
+  display: block;
+  font-size: 10px;
+  letter-spacing: 6px;
+  color: var(--clr-gold);
+  margin-bottom: 6px;
+}
+
+.title-logo::after {
+  content: '★ ★ ★';
+  display: block;
+  font-size: 10px;
+  letter-spacing: 6px;
+  color: var(--clr-gold);
+  margin-top: 6px;
+}
+
+.title-kuma {
+  display: block;
+  font-size: 28px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  color: var(--clr-gold);
+  text-shadow:
+    2px 2px 0 #000,
+    -1px -1px 0 #4a2e00;
+  line-height: 1.3;
+}
+
+.title-sub {
+  display: block;
+  font-size: 16px;
+  color: var(--clr-accent);
+  letter-spacing: 4px;
+  text-shadow: 1px 1px 0 #000;
+  margin-top: 4px;
+}
+
+.home-story {
+  font-size: 13px;
+  color: var(--clr-muted);
+  text-align: center;
+  line-height: 1.8;
+  max-width: 320px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--clr-border);
+  border-right: 3px solid var(--clr-border);
+  background: var(--clr-surface);
+}
+
+.home-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 280px;
+}
+
+/* ==== ボタン共通 ==== */
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 10px 16px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 15px;
+  font-weight: bold;
+  color: var(--clr-text);
+  background: var(--clr-btn);
+  border: 3px solid var(--clr-border);
+  border-radius: 0;
+  box-shadow: 3px 3px 0 #000;
+  cursor: pointer;
+  letter-spacing: 1px;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: none;
+}
+
+.btn:active {
+  background: var(--clr-btn-act);
+  box-shadow: 1px 1px 0 #000;
+  transform: translate(2px, 2px);
+}
+
+.btn-primary {
+  background: var(--clr-green);
+  border-color: #5ab040;
+  color: #e8ffd8;
+}
+
+.btn-primary:active {
+  background: #2a5a1a;
+}
+
+.btn-danger {
+  background: var(--clr-red);
+  border-color: #d05040;
+  color: #ffe8e8;
+}
+
+.btn-danger:active {
+  background: #701810;
+}
+
+/* リンクボタン */
+.btn-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 10px 16px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 14px;
+  color: var(--clr-muted);
+  background: transparent;
+  border: 2px dashed var(--clr-border);
+  text-decoration: none;
+  letter-spacing: 1px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-link:active {
+  color: var(--clr-accent);
+  border-color: var(--clr-accent);
+}
+
+/* ==== 名前入力画面 ==== */
+#screenName {
+  justify-content: center;
+  align-items: center;
+  background: var(--clr-bg);
+  padding: 24px 24px;
+  gap: 24px;
+}
+
+.name-title {
+  font-size: 18px;
+  color: var(--clr-gold);
+  letter-spacing: 2px;
+  text-align: center;
+  text-shadow: 1px 1px 0 #000;
+}
+
+.name-form {
+  width: 100%;
+  max-width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.name-label {
+  font-size: 14px;
+  color: var(--clr-muted);
+  letter-spacing: 1px;
+}
+
+#nameInput {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 12px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 18px;
+  color: var(--clr-text);
+  background: var(--clr-surface);
+  border: 3px solid var(--clr-border);
+  border-radius: 0;
+  outline: none;
+  /* 入力フィールドは選択可能にする */
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+  touch-action: auto;
+}
+
+#nameInput:focus {
+  border-color: var(--clr-accent);
+  background: var(--clr-panel);
+}
+
+/* ==== ゲーム画面 ==== */
+#screenGame {
+  flex-direction: column;
+  background: #000;
+  height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* HUD */
+#hud {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 8px;
+  background: var(--clr-surface);
+  border-bottom: 2px solid var(--clr-border);
+  font-size: 14px;
+  font-weight: bold;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.hud-floor {
+  color: var(--clr-gold);
+  white-space: nowrap;
+}
+
+.hud-sep {
+  color: var(--clr-border);
+}
+
+.hud-lv {
+  color: var(--clr-accent);
+  white-space: nowrap;
+}
+
+.hud-hp-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.hud-hp-label {
+  color: var(--clr-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+#hudHpBar {
+  width: 64px;
+  min-width: 40px;
+  height: 10px;
+  background: var(--clr-hp-bg);
+  border: 1px solid var(--clr-border);
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+#hudHpBar .hp-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 100%;
+  background: var(--clr-hp);
+  transition: width 0.1s;
+}
+
+#hudHp {
+  font-size: 12px;
+  color: var(--clr-text);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.hud-satiety {
+  color: #a0c850;
+  white-space: nowrap;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* キャンバス領域 */
+#canvasWrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #000;
+  min-height: 0;
+}
+
+#gameCanvas {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  width: 100%;
+  height: 100%;
+}
+
+/* ミニマップ */
+#miniCanvas {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 96px;
+  height: 60px;
+  border: 2px solid rgba(100, 70, 30, 0.6);
+  background: rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* メッセージログ */
+#msgLog {
+  height: 66px;
+  min-height: 66px;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  background: var(--clr-surface);
+  border-top: 2px solid var(--clr-border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 1px;
+}
+
+.log-line {
+  font-size: 14px;
+  color: var(--clr-text);
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.log-line.old {
+  color: var(--clr-muted);
+}
+
+/* 操作エリア */
+#controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  background: var(--clr-surface);
+  border-top: 3px solid var(--clr-border);
+  flex-shrink: 0;
+}
+
+/* 8方向パッド */
+#dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 48px);
+  grid-template-rows: repeat(3, 48px);
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.dirBtn {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: var(--clr-text);
+  background: var(--clr-btn);
+  border: 2px solid var(--clr-border);
+  border-radius: 0;
+  box-shadow: 2px 2px 0 #000;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dirBtn:active {
+  background: var(--clr-btn-act);
+  box-shadow: 0 0 0 #000;
+  transform: translate(2px, 2px);
+}
+
+/* 中央セル（無効な飾り） */
+.dpad-center {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--clr-panel);
+  border: 2px solid var(--clr-border);
+  font-size: 18px;
+  color: var(--clr-muted);
+  pointer-events: none;
+}
+
+/* 右側アクションボタン群 */
+#actionBtns {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+}
+
+#btnAttack {
+  min-height: 64px;
+  min-width: 80px;
+  font-size: 16px;
+  background: var(--clr-red);
+  border-color: #d05040;
+  color: #ffe8e8;
+  box-shadow: 3px 3px 0 #000;
+}
+
+#btnAttack:active {
+  background: #701810;
+}
+
+#btnWait, #btnMenu {
+  min-height: 44px;
+  min-width: 80px;
+  font-size: 13px;
+}
+
+/* ==== 結果画面 ==== */
+#screenResult {
+  justify-content: flex-start;
+  align-items: center;
+  background: var(--clr-bg);
+  padding: 20px 16px;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.result-header {
+  width: 100%;
+  max-width: 340px;
+  text-align: center;
+  padding: 12px;
+  background: var(--clr-surface);
+  border: 3px solid var(--clr-border);
+  box-shadow: 3px 3px 0 #000;
+}
+
+#resultMsg {
+  font-size: 14px;
+  color: var(--clr-text);
+  line-height: 1.8;
+  margin-bottom: 8px;
+}
+
+#resultScore {
+  font-size: 40px;
+  font-weight: bold;
+  color: var(--clr-gold);
+  letter-spacing: 3px;
+  text-shadow: 2px 2px 0 #000;
+}
+
+.result-submit-area {
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+#submitStatus {
+  font-size: 14px;
+  color: var(--clr-muted);
+  text-align: center;
+  min-height: 20px;
+}
+
+#rankingBox {
+  width: 100%;
+  max-width: 340px;
+  background: var(--clr-surface);
+  border: 2px solid var(--clr-border);
+  padding: 8px;
+  min-height: 60px;
+}
+
+.ranking-title {
+  font-size: 13px;
+  color: var(--clr-gold);
+  letter-spacing: 2px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--clr-border);
+  padding-bottom: 4px;
+}
+
+#yourRank {
+  font-size: 13px;
+  color: var(--clr-accent);
+  text-align: center;
+  margin-top: 4px;
+}
+
+.result-btns {
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ==== モーダル共通 ==== */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal-overlay.open {
+  display: flex;
+}
+
+.modal-box {
+  width: 100%;
+  max-width: 360px;
+  max-height: 80vh;
+  background: var(--clr-surface);
+  border: 4px solid var(--clr-border);
+  box-shadow: 4px 4px 0 #000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  padding: 10px 14px;
+  background: var(--clr-panel);
+  border-bottom: 2px solid var(--clr-border);
+  font-size: 15px;
+  font-weight: bold;
+  color: var(--clr-gold);
+  letter-spacing: 2px;
+  flex-shrink: 0;
+}
+
+.modal-body {
+  padding: 12px 14px;
+  overflow-y: auto;
+  flex: 1;
+  /* ルール本文は読める状態にする */
+}
+
+.modal-footer {
+  padding: 10px 14px;
+  border-top: 2px solid var(--clr-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ルールモーダル */
+#ruleModal .modal-body {
+  /* ルール文は選択・スクロール可能 */
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+  touch-action: auto;
+}
+
+#ruleModal .modal-body p {
+  font-size: 14px;
+  color: var(--clr-text);
+  line-height: 1.8;
+  margin-bottom: 10px;
+  padding-left: 4px;
+  border-left: 2px solid var(--clr-accent);
+}
+
+/* メニューモーダル */
+.menu-tabs {
+  display: flex;
+  border-bottom: 2px solid var(--clr-border);
+  flex-shrink: 0;
+}
+
+.menu-tab {
+  flex: 1;
+  padding: 8px 4px;
+  font-size: 13px;
+  font-weight: bold;
+  color: var(--clr-muted);
+  background: var(--clr-surface);
+  border: none;
+  border-right: 1px solid var(--clr-border);
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: 'Courier New', Courier, monospace;
+  letter-spacing: 1px;
+}
+
+.menu-tab:last-child {
+  border-right: none;
+}
+
+.menu-tab.active {
+  background: var(--clr-panel);
+  color: var(--clr-gold);
+  border-bottom: 2px solid var(--clr-gold);
+}
+
+.menu-tab:active {
+  background: var(--clr-btn-act);
+}
+
+.menu-pane {
+  display: none;
+  padding: 10px;
+  min-height: 80px;
+}
+
+.menu-pane.active {
+  display: block;
+}
+
+.menu-list {
+  list-style: none;
+  font-size: 14px;
+  color: var(--clr-muted);
+}
+
+/* 確認ダイアログ */
+#confirmDialog .modal-body {
+  text-align: center;
+}
+
+#confirmText {
+  font-size: 16px;
+  color: var(--clr-text);
+  line-height: 1.8;
+}
+
+#confirmDialog .modal-footer {
+  flex-direction: row;
+  justify-content: center;
+  gap: 16px;
+}
+
+#btnConfirmOk, #btnConfirmCancel {
+  min-width: 100px;
+  min-height: 44px;
+}
+
+/* 投擲方向オーバーレイ */
+#dirOverlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  z-index: 110;
+  align-items: center;
+  justify-content: center;
+}
+
+#dirOverlay.open {
+  display: flex;
+}
+
+.dir-overlay-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.dir-overlay-label {
+  font-size: 16px;
+  color: var(--clr-text);
+  font-weight: bold;
+}
+
+.dir-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 56px);
+  grid-template-rows: repeat(3, 56px);
+  gap: 3px;
+}
+
+.throwBtn {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: var(--clr-text);
+  background: var(--clr-btn);
+  border: 2px solid var(--clr-border);
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.throwBtn:active {
+  background: var(--clr-btn-act);
+  transform: translate(1px, 1px);
+}
+
+.throw-center {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--clr-muted);
+  background: var(--clr-panel);
+  border: 2px solid var(--clr-border);
+}
+
+/* ==== 縦持ち強制オーバーレイ ==== */
+#rotateOverlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--clr-bg);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
+  text-align: center;
+  padding: 24px;
+}
+
+.rotate-icon {
+  font-size: 64px;
+  animation: rotateAnim 2s infinite;
+}
+
+@keyframes rotateAnim {
+  0%   { transform: rotate(0deg); }
+  50%  { transform: rotate(-90deg); }
+  100% { transform: rotate(0deg); }
+}
+
+.rotate-text {
+  font-size: 18px;
+  color: var(--clr-text);
+  font-weight: bold;
+}
+
+/* 横持ち時にオーバーレイ表示 */
+@media (orientation: landscape) and (max-height: 500px) {
+  #rotateOverlay {
+    display: flex;
+  }
+}
+
+/* ==== hidden ユーティリティ ==== */
+.hidden {
+  display: none !important;
+}
+</style>
+</head>
+<body>
+<div id="appRoot">
+
+  <!-- ホーム画面 -->
+  <section id="screenHome" class="screen active">
+    <div class="title-logo">
+      <span class="title-kuma">熊のFP探し</span>
+      <span class="title-sub">🐻</span>
+    </div>
+    <p class="home-story">FP＝ファーストパートナーを探して、熊はダンジョンの奥深くへ潜っていく。</p>
+    <div class="home-btns">
+      <button id="btnStart" class="btn btn-primary">ゲーム開始</button>
+      <button id="btnRule" class="btn">ルール説明</button>
+      <button id="btnShareGame" class="btn">ゲームをシェア</button>
+      <a id="linkLab" class="btn-link" href="">▷ 実験場へ</a>
+    </div>
+  </section>
+
+  <!-- 名前入力画面 -->
+  <section id="screenName" class="screen">
+    <p class="name-title">🐻 冒険者のなまえ</p>
+    <div class="name-form">
+      <label class="name-label" for="nameInput">なまえ（1〜10文字）</label>
+      <input id="nameInput" type="text" maxlength="10" autocomplete="nickname" placeholder="ななしのくま">
+      <button id="btnGo" class="btn btn-primary">冒険に出る</button>
+    </div>
+  </section>
+
+  <!-- ゲーム画面 -->
+  <section id="screenGame" class="screen">
+    <!-- HUD -->
+    <div id="hud">
+      <span class="hud-floor">B<span id="hudFloor">1</span>F</span>
+      <span class="hud-sep">|</span>
+      <span class="hud-lv">Lv <span id="hudLv">1</span></span>
+      <span class="hud-sep">|</span>
+      <div class="hud-hp-wrap">
+        <span class="hud-hp-label">HP</span>
+        <div id="hudHpBar"><div class="hp-fill"></div></div>
+        <span id="hudHp">15/15</span>
+      </div>
+      <span class="hud-sep">|</span>
+      <span class="hud-satiety">満腹 <span id="hudSatiety">100</span></span>
+    </div>
+
+    <!-- キャンバス領域 -->
+    <div id="canvasWrap">
+      <canvas id="gameCanvas"></canvas>
+      <canvas id="miniCanvas" width="96" height="60"></canvas>
+    </div>
+
+    <!-- メッセージログ -->
+    <div id="msgLog">
+      <!-- ログ行はJSで生成 -->
+    </div>
+
+    <!-- 操作エリア -->
+    <div id="controls">
+      <!-- 8方向パッド -->
+      <div id="dpad">
+        <!-- 上段: 左上・上・右上 -->
+        <button class="dirBtn" data-dx="-1" data-dy="-1">↖</button>
+        <button class="dirBtn" data-dx="0"  data-dy="-1">↑</button>
+        <button class="dirBtn" data-dx="1"  data-dy="-1">↗</button>
+        <!-- 中段: 左・中央（飾り）・右 -->
+        <button class="dirBtn" data-dx="-1" data-dy="0">←</button>
+        <div class="dpad-center">🐻</div>
+        <button class="dirBtn" data-dx="1"  data-dy="0">→</button>
+        <!-- 下段: 左下・下・右下 -->
+        <button class="dirBtn" data-dx="-1" data-dy="1">↙</button>
+        <button class="dirBtn" data-dx="0"  data-dy="1">↓</button>
+        <button class="dirBtn" data-dx="1"  data-dy="1">↘</button>
+      </div>
+
+      <!-- 右側アクションボタン -->
+      <div id="actionBtns">
+        <button id="btnAttack" class="btn">こうげき</button>
+        <button id="btnWait" class="btn">足踏み</button>
+        <button id="btnMenu" class="btn">メニュー</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 結果画面 -->
+  <section id="screenResult" class="screen">
+    <div class="result-header">
+      <div id="resultMsg">ゲーム終了</div>
+      <div id="resultScore">B1F</div>
+    </div>
+
+    <div class="result-submit-area">
+      <div id="submitStatus"></div>
+      <button id="btnSubmitScore" class="btn btn-primary">ランキングに登録</button>
+      <button id="btnRetrySubmit" class="btn hidden">再試行</button>
+    </div>
+
+    <div id="rankingBox">
+      <div class="ranking-title">▶ ランキング</div>
+      <!-- P7で実装 -->
+    </div>
+    <div id="yourRank"></div>
+
+    <div class="result-btns">
+      <button id="btnAgain" class="btn btn-primary">もう一度</button>
+      <button id="btnShareResult" class="btn" data-share-text="">結果をシェア</button>
+      <button id="btnHome" class="btn">ホームへ</button>
+      <a id="linkLabResult" class="btn-link" href="">▷ 実験場へ</a>
+    </div>
+  </section>
+
+</div><!-- /appRoot -->
+
+<!-- ==== モーダル: ルール説明 ==== -->
+<div id="ruleModal" class="modal-overlay" role="dialog" aria-modal="true">
+  <div class="modal-box">
+    <div class="modal-header">📜 ルール説明</div>
+    <div class="modal-body">
+      <p>熊を8方向パッドで動かし、下り階段でどんどん深く潜ろう。</p>
+      <p>スコアは最深到達階（B◯F）。倒れるか「あきらめる」で終了。</p>
+      <p>敵には隣接して「こうげき」。倒すと経験値、レベルアップで強くなる。</p>
+      <p>アイテムは上に乗ると拾う。メニューの持ち物から使う・置く。武器と盾は装備できる。</p>
+      <p>満腹度は時間で減り、0になるとHPが減っていく。食料で回復しよう。</p>
+      <p>床には見えない罠がひそんでいる。</p>
+      <p>深く潜るほど敵は強くなる。FPは見つかるのか…？</p>
+    </div>
+    <div class="modal-footer">
+      <button id="btnRuleClose" class="btn">とじる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==== モーダル: メニュー ==== -->
+<div id="menuModal" class="modal-overlay" role="dialog" aria-modal="true">
+  <div class="modal-box">
+    <div class="modal-header">📋 メニュー</div>
+    <div class="menu-tabs">
+      <button class="menu-tab active" data-tab="menuItems">持ち物</button>
+      <button class="menu-tab" data-tab="menuEquip">装備</button>
+      <button class="menu-tab" data-tab="menuStatus">状態</button>
+    </div>
+    <div class="modal-body" style="padding:0;">
+      <!-- 持ち物タブ -->
+      <div id="menuItems" class="menu-pane active">
+        <ul class="menu-list">
+          <!-- P5で実装 -->
+        </ul>
+      </div>
+      <!-- 装備タブ -->
+      <div id="menuEquip" class="menu-pane">
+        <ul class="menu-list">
+          <!-- P5で実装 -->
+        </ul>
+      </div>
+      <!-- 状態タブ -->
+      <div id="menuStatus" class="menu-pane">
+        <ul class="menu-list">
+          <!-- P5で実装 -->
+        </ul>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button id="btnGiveup" class="btn btn-danger">あきらめる</button>
+      <button id="btnMenuClose" class="btn">とじる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==== 確認ダイアログ ==== -->
+<div id="confirmDialog" class="modal-overlay" role="dialog" aria-modal="true">
+  <div class="modal-box">
+    <div class="modal-header">確認</div>
+    <div class="modal-body">
+      <p id="confirmText">よろしいですか？</p>
+    </div>
+    <div class="modal-footer">
+      <button id="btnConfirmOk" class="btn btn-danger">はい</button>
+      <button id="btnConfirmCancel" class="btn">いいえ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==== 投擲方向オーバーレイ ==== -->
+<div id="dirOverlay">
+  <div class="dir-overlay-inner">
+    <div class="dir-overlay-label">どの方向に投げる？</div>
+    <div class="dir-grid">
+      <!-- 上段 -->
+      <button class="throwBtn" data-dx="-1" data-dy="-1">↖</button>
+      <button class="throwBtn" data-dx="0"  data-dy="-1">↑</button>
+      <button class="throwBtn" data-dx="1"  data-dy="-1">↗</button>
+      <!-- 中段 -->
+      <button class="throwBtn" data-dx="-1" data-dy="0">←</button>
+      <div class="throw-center">投</div>
+      <button class="throwBtn" data-dx="1"  data-dy="0">→</button>
+      <!-- 下段 -->
+      <button class="throwBtn" data-dx="-1" data-dy="1">↙</button>
+      <button class="throwBtn" data-dx="0"  data-dy="1">↓</button>
+      <button class="throwBtn" data-dx="1"  data-dy="1">↘</button>
+    </div>
+    <button id="btnThrowCancel" class="btn">キャンセル</button>
+  </div>
+</div>
+
+<!-- ==== 縦持ち強制オーバーレイ ==== -->
+<div id="rotateOverlay">
+  <div class="rotate-icon">📱</div>
+  <div class="rotate-text">縦にしてください</div>
+</div>
+
+<script>
+'use strict';
+
+// ==== SECTION: CONFIG ====
+const CONFIG = Object.freeze({
+  // Supabase接続情報（§9.1）
+  SUPABASE_URL:    'https://mlpnjgezrnhdxsxolyzj.supabase.co',
+  SUPABASE_KEY:    'sb_publishable_drzcy0v97knU6FgjqSgBHw_0A9XPdFM',
+  // ゲーム識別子・バージョン（§9.3）
+  GAME_SLUG:       'kuma_no_fpsagashi',
+  CLIENT_VERSION:  'v1',
+  // 実験場URL（§4.1）
+  LAB_URL:         'https://chameleonjp.codeberg.page/chameleonjp_lab/',
+  // localStorage キー（§4.2）
+  STORAGE_NAME_KEY:'kuma_no_fpsagashi_player_name',
+  DEFAULT_NAME:    'ななしのくま',
+
+  // ダンジョン生成パラメータ（§6.1）
+  MAP_W:           32,
+  MAP_H:           20,
+  TILE:            32,
+  ROOMS_MIN:        4,
+  ROOMS_MAX:        7,
+  ROOM_MIN:         3,
+  ROOM_MAX_W:       6,
+  ROOM_MAX_H:       6,
+
+  // アイテム・罠（§6.1, §5.2）
+  ITEM_MIN:         2,
+  ITEM_MAX:         4,
+  TRAP_MIN:         2,
+  TRAP_MAX:         4,
+  TRAP_PER_FLOORS:  6,
+  TRAP_CAP:         8,
+
+  // 敵湧き（§6.1）
+  ENEMY_INIT_MIN:   3,
+  ENEMY_INIT_MAX:   5,
+  SPAWN_EVERY_TURNS:20,
+  ENEMY_CAP:       10,
+
+  // プレイヤー初期値（§8.1）
+  PLAYER_HP:       15,
+  PLAYER_ATK:       3,
+  PLAYER_DEF:       1,
+  PLAYER_SATIETY: 100,
+  INV_MAX:         10,
+  LV_MAX:          30,
+
+  // 経験値・レベルアップ（§8.1）
+  XP_BASE:         10,
+  XP_MULT:        1.4,
+  LVUP_HP:          5,
+  LVUP_ATK:         1,
+  LVUP_DEF_EVERY:   3,
+
+  // ターン経過処理（§8.1, §8.5）
+  REGEN_EVERY_TURNS:  2,
+  HUNGER_EVERY_TURNS:10,
+  HUNGER_WARN:       30,
+
+  // 深層補正（§5.2）
+  DEEP_FLOOR:      16,
+  DEEP_RATE:      0.1,
+  DEEP_BASE_FLOOR:15,
+
+  // レアアイテム出現（§8.4）
+  RARE_ITEM_FLOOR:  8,
+
+  // 連続移動間隔（§7.3）
+  REPEAT_MS:      160,
+
+  // 独り言（§8.2）
+  MONO_INTERVAL_MS:20000,
+  MONO_SHOW_MS:    4000,
+
+  // 状態異常（§8.3, §8.4）
+  SLEEP_TURNS:      2,
+  SLEEP_CHANCE:   0.2,
+  STUN_TURNS:       5,
+  THROW_DMG:       10,
+
+  // ランキング（§9.4）
+  RPC_TIMEOUT_MS:  8000,
+  RANK_FETCH_LIMIT:100,
+  RANK_SHOW:       10,
+});
+
+// ==== SECTION: DATA ====
+const DATA = Object.freeze({
+  // 敵データ（§8.3の表から転記）
+  ENEMIES: Object.freeze({
+    hachi:      { name:'ハチのむれ',           emoji:'🐝', hp:4,  atk:2, def:0, exp:2,  minF:1,        maxF:3,        ai:'charge'  },
+    kitsune:    { name:'ずるいキツネ',          emoji:'🦊', hp:6,  atk:3, def:1, exp:4,  minF:1,        maxF:4,        ai:'fox'     },
+    karasu:     { name:'いかくカラス',          emoji:'🦅', hp:5,  atk:4, def:0, exp:5,  minF:3,        maxF:6,        ai:'slow'    },
+    yamaarashi: { name:'とげとげヤマアラシ',    emoji:'🦔', hp:10, atk:3, def:3, exp:8,  minF:5,        maxF:9,        ai:'counter' },
+    hebi:       { name:'ねむりヘビ',            emoji:'🐍', hp:8,  atk:4, def:1, exp:9,  minF:7,        maxF:Infinity, ai:'sleep'   },
+    inoshishi:  { name:'ぬしのイノシシ',        emoji:'🐗', hp:16, atk:6, def:2, exp:15, minF:10,       maxF:Infinity, ai:'boar'    },
+  }),
+
+  // アイテムデータ（§8.4の表から転記）
+  ITEMS: Object.freeze({
+    hachimitsu:  { name:'はちみつ',           cat:'food',   emoji:'🍯', satiety:50                          },
+    sake:        { name:'おおきな鮭',          cat:'food',   emoji:'🐟', satiety:100, hp:5                   },
+    kinomi:      { name:'山の木の実',          cat:'heal',   emoji:'🌰', hp:25                               },
+    hikaru:      { name:'ひかる木の実',        cat:'heal',   emoji:'✨', full:true, maxUp:2                   },
+    matsubokkuri:{ name:'とがった松ぼっくり',  cat:'throw',  emoji:'🌲', dmg:10                              },
+    shibire:     { name:'しびれ茸',            cat:'throw',  emoji:'🍄', stun:5                              },
+    tsume1:      { name:'木の枝のツメ',        cat:'weapon', emoji:'🪵', atk:2                               },
+    tsume2:      { name:'岩のツメ',            cat:'weapon', emoji:'🪨', atk:5                               },
+    tsume3:      { name:'月のツメ',            cat:'weapon', emoji:'🌙', atk:9, minF:8                       },
+    kegawa1:     { name:'ふかふか毛皮',        cat:'shield', emoji:'🧣', def:2                               },
+    kegawa2:     { name:'こわい毛皮',          cat:'shield', emoji:'🧥', def:5                               },
+    kegawa3:     { name:'ぬしの毛皮',          cat:'shield', emoji:'🦺', def:8, minF:8                       },
+  }),
+
+  // 罠データ（§8.6の表から転記）
+  TRAPS: Object.freeze({
+    toge:      { name:'とげの床',           emoji:'🔺', dmg:5        },
+    kafun:     { name:'はらぺこの花粉',     emoji:'🌼', satiety:20   },
+    otoshiana: { name:'ぐるぐる落とし穴',   emoji:'🌀', warp:true    },
+  }),
+
+  // 独り言リスト（§8.2 一字一句変更禁止。P6でメインセッションが厳密注入する）
+  MONOLOGUE_LINES: [],
+
+  // プレイヤー絵文字
+  PLAYER_EMOJI: '🐻',
+});
+
+// ==== CORE-BEGIN ====
+
+// ==== SECTION: UTIL ====
+// P3で実装
+
+// ==== SECTION: DUNGEON-GEN ====
+// P3で実装
+
+// ==== SECTION: TURN-CORE ====
+// P4で実装
+
+// ==== CORE-END ====
+
+// ==== SECTION: GAME-STATE ====
+/** グローバル状態オブジェクト（依頼書§11: 状態は1オブジェクトに集約） */
+const G = {
+  screen:     'home',
+  playerName: '',
+  run:        null,
+};
+
+/** ゲーム進行の glue 層（CORE呼び出し＋画面更新。P3以降が実装） */
+const Game = {
+  /** 新規プレイ開始（P3以降が実装） */
+  newRun() {
+    // P3で実装
+  },
+};
+
+// ==== SECTION: RENDER ====
+/**
+ * Canvasのリサイズと黒塗り（P2分）。
+ * ゲームロジックへの依存なし。
+ */
+const Render = (() => {
+  const gameCanvas  = document.getElementById('gameCanvas');
+  const miniCanvas  = document.getElementById('miniCanvas');
+  const canvasWrap  = document.getElementById('canvasWrap');
+  let   gameCtx     = gameCanvas.getContext('2d');
+  let   miniCtx     = miniCanvas.getContext('2d');
+
+  /** ゲームキャンバスをcanvasWrap実サイズ×DPRでリサイズして黒塗り */
+  function resizeGame() {
+    const dpr = window.devicePixelRatio || 1;
+    const w   = canvasWrap.clientWidth;
+    const h   = canvasWrap.clientHeight;
+    if (w <= 0 || h <= 0) return;
+    gameCanvas.width  = Math.round(w * dpr);
+    gameCanvas.height = Math.round(h * dpr);
+    gameCtx = gameCanvas.getContext('2d');
+    gameCtx.scale(dpr, dpr);
+    // P2: 黒塗りのみ
+    gameCtx.fillStyle = '#000';
+    gameCtx.fillRect(0, 0, w, h);
+  }
+
+  /** ミニキャンバスを黒塗り（固定96×60） */
+  function paintMini() {
+    miniCtx.fillStyle = '#000';
+    miniCtx.fillRect(0, 0, miniCanvas.width, miniCanvas.height);
+  }
+
+  /** リサイズ処理（外部公開） */
+  function resize() {
+    resizeGame();
+    paintMini();
+  }
+
+  return { resize, gameCtx: () => gameCtx, miniCtx: () => miniCtx };
+})();
+
+// ==== SECTION: HUD-LOG ====
+/**
+ * HUD更新とメッセージログ。
+ * Log.add(text) で直近3行を#msgLogに表示（古い行は上・薄表示）。
+ */
+const Log = (() => {
+  const msgLog  = document.getElementById('msgLog');
+  /** ログ行バッファ（最大3行） */
+  const lines   = [];
+
+  /**
+   * メッセージを追加する。
+   * @param {string} text - 表示するテキスト
+   */
+  function add(text) {
+    lines.push(text);
+    if (lines.length > 3) lines.shift();
+    render();
+  }
+
+  /** #msgLog を再描画 */
+  function render() {
+    msgLog.textContent = '';
+    const total = lines.length;
+    lines.forEach((t, i) => {
+      const div = document.createElement('div');
+      div.className = 'log-line' + (i < total - 1 ? ' old' : '');
+      div.textContent = t;
+      msgLog.appendChild(div);
+    });
+  }
+
+  /** ログをクリア */
+  function clear() {
+    lines.length = 0;
+    msgLog.textContent = '';
+  }
+
+  return { add, clear };
+})();
+
+// ==== SECTION: INPUT ====
+// P4で実装（ハンドラ配線）
+
+// ==== SECTION: MENU ====
+// P5で実装
+
+// ==== SECTION: MONOLOGUE ====
+// P6で実装
+
+// ==== SECTION: UI-SCREENS ====
+/**
+ * 画面遷移・モーダル・シェア・確認ダイアログ管理。
+ */
+const UI = (() => {
+  // 現在開いている確認コールバック
+  let confirmCallback = null;
+
+  /**
+   * 指定IDの画面をアクティブにする（.active クラスで切り替え）。
+   * @param {string} name - 'home' | 'name' | 'game' | 'result'
+   */
+  function showScreen(name) {
+    const idMap = {
+      home:   'screenHome',
+      name:   'screenName',
+      game:   'screenGame',
+      result: 'screenResult',
+    };
+    document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
+    const target = document.getElementById(idMap[name]);
+    if (target) target.classList.add('active');
+    G.screen = name;
+    // ゲーム画面へ遷移時はキャンバスリサイズ
+    if (name === 'game') {
+      // 次フレームでリサイズ（レイアウト確定後）
+      requestAnimationFrame(() => Render.resize());
+    }
+  }
+
+  /**
+   * モーダルを開く。
+   * @param {string} id - モーダル要素のID
+   */
+  function openModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('open');
+  }
+
+  /**
+   * モーダルを閉じる。
+   * @param {string} id - モーダル要素のID
+   */
+  function closeModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('open');
+  }
+
+  /**
+   * 汎用確認ダイアログ。
+   * @param {string}   text - 確認テキスト
+   * @param {Function} onOk - 「はい」を押したときのコールバック
+   */
+  function confirm(text, onOk) {
+    document.getElementById('confirmText').textContent = text;
+    confirmCallback = onOk;
+    openModal('confirmDialog');
+  }
+
+  /**
+   * シェアボタン共通処理。
+   * Web Share API → navigator.clipboard の順でフォールバック。
+   * @param {string} shareText - シェアするテキスト
+   * @param {HTMLButtonElement} btn - ボタン要素（文言を一時的に変更するため）
+   */
+  async function doShare(shareText, btn) {
+    const url     = location.href;
+    const fullText = shareText + ' ' + url;
+    try {
+      if (navigator.share) {
+        await navigator.share({ text: shareText, url });
+        return;
+      }
+      // フォールバック: クリップボードコピー
+      await navigator.clipboard.writeText(fullText);
+      const orig = btn.textContent;
+      btn.textContent = 'コピーしました';
+      setTimeout(() => { btn.textContent = orig; }, 1800);
+    } catch (_) {
+      // 失敗は握りつぶす
+    }
+  }
+
+  // ---------- イベントハンドラ ----------
+
+  // ゲーム開始ボタン
+  document.getElementById('btnStart').addEventListener('click', () => {
+    showScreen('name');
+  });
+
+  // ルール説明ボタン
+  document.getElementById('btnRule').addEventListener('click', () => {
+    openModal('ruleModal');
+  });
+
+  // ルール閉じる
+  document.getElementById('btnRuleClose').addEventListener('click', () => {
+    closeModal('ruleModal');
+  });
+
+  // ゲームをシェア
+  document.getElementById('btnShareGame').addEventListener('click', function() {
+    doShare('『熊のFP探し』FPを探して底なしダンジョンへ。どこまで潜れる？', this);
+  });
+
+  // 名前入力: 冒険に出る
+  document.getElementById('btnGo').addEventListener('click', () => {
+    const input  = document.getElementById('nameInput');
+    const raw    = input.value.trim();
+    const name   = raw.length > 0 ? raw : CONFIG.DEFAULT_NAME;
+    G.playerName = name;
+    // localStorageに保存
+    try { localStorage.setItem(CONFIG.STORAGE_NAME_KEY, name); } catch (_) {}
+    showScreen('game');
+    Game.newRun();
+  });
+
+  // 名前入力: Enterキーでも進む
+  document.getElementById('nameInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      document.getElementById('btnGo').click();
+    }
+  });
+
+  // もう一度（名前入力スキップ）
+  document.getElementById('btnAgain').addEventListener('click', () => {
+    showScreen('game');
+    Game.newRun();
+  });
+
+  // ホームへ
+  document.getElementById('btnHome').addEventListener('click', () => {
+    showScreen('home');
+  });
+
+  // 結果をシェア（P7がdataset.shareTextを設定する）
+  document.getElementById('btnShareResult').addEventListener('click', function() {
+    const text = this.dataset.shareText || '『熊のFP探し』でダンジョンに挑戦！';
+    doShare(text, this);
+  });
+
+  // メニューボタン（ゲーム画面）
+  document.getElementById('btnMenu').addEventListener('click', () => {
+    openModal('menuModal');
+  });
+
+  // メニュー閉じる
+  document.getElementById('btnMenuClose').addEventListener('click', () => {
+    closeModal('menuModal');
+  });
+
+  // あきらめる（確認ダイアログ経由）
+  document.getElementById('btnGiveup').addEventListener('click', () => {
+    confirm('ほんとうにあきらめますか？', () => {
+      closeModal('menuModal');
+      // P4でゲーム終了処理を呼ぶ
+    });
+  });
+
+  // 確認ダイアログ: はい
+  document.getElementById('btnConfirmOk').addEventListener('click', () => {
+    closeModal('confirmDialog');
+    if (typeof confirmCallback === 'function') {
+      confirmCallback();
+      confirmCallback = null;
+    }
+  });
+
+  // 確認ダイアログ: いいえ
+  document.getElementById('btnConfirmCancel').addEventListener('click', () => {
+    closeModal('confirmDialog');
+    confirmCallback = null;
+  });
+
+  // メニュータブ切り替え
+  document.querySelectorAll('.menu-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.menu-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.menu-pane').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      const pane = document.getElementById(tab.dataset.tab);
+      if (pane) pane.classList.add('active');
+    });
+  });
+
+  // 投擲キャンセル
+  document.getElementById('btnThrowCancel').addEventListener('click', () => {
+    document.getElementById('dirOverlay').classList.remove('open');
+  });
+
+  // モーダル外クリックで閉じる（ruleModal・menuModal のみ）
+  ['ruleModal', 'menuModal'].forEach(id => {
+    document.getElementById(id).addEventListener('click', (e) => {
+      if (e.target.id === id) closeModal(id);
+    });
+  });
+
+  return { showScreen, openModal, closeModal, confirm, doShare };
+})();
+
+// ==== SECTION: SUPABASE ====
+// P7で実装
+
+// ==== SECTION: BOOT ====
+/**
+ * 初期化処理。
+ */
+(function boot() {
+  // 実験場URLを設定
+  document.getElementById('linkLab').href       = CONFIG.LAB_URL;
+  document.getElementById('linkLabResult').href = CONFIG.LAB_URL;
+
+  // localStorageから前回の名前を復元
+  try {
+    const saved = localStorage.getItem(CONFIG.STORAGE_NAME_KEY);
+    if (saved) {
+      document.getElementById('nameInput').value = saved;
+    }
+  } catch (_) {}
+
+  // ホーム画面を表示
+  UI.showScreen('home');
+
+  // スマホ操作抑止（仕様§3）
+  // ジェスチャースタート（ピンチズーム等）を抑止
+  document.addEventListener('gesturestart', (e) => { e.preventDefault(); }, { passive: false });
+  // ダブルタップ拡大を抑止
+  document.addEventListener('dblclick', (e) => { e.preventDefault(); });
+  // コンテキストメニューを抑止（input要素以外）
+  document.addEventListener('contextmenu', (e) => {
+    if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+      e.preventDefault();
+    }
+  });
+
+  // リサイズ・向き変更でキャンバスを再調整
+  window.addEventListener('resize', () => {
+    if (G.screen === 'game') Render.resize();
+  });
+  window.addEventListener('orientationchange', () => {
+    if (G.screen === 'game') {
+      setTimeout(() => Render.resize(), 100);
+    }
+  });
+})();
+</script>
+</body>
+</html>
