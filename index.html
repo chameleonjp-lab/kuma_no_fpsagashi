@@ -1215,13 +1215,447 @@ const DATA = Object.freeze({
 // ==== CORE-BEGIN ====
 
 // ==== SECTION: UTIL ====
-// P3で実装
+// CORE層共通の純粋ユーティリティ（DOM非依存・vm実行可能）
+
+/** a〜b（両端含む）の整数を一様乱数で返す */
+function randInt(a, b) {
+  return a + Math.floor(Math.random() * (b - a + 1));
+}
+
+/** 配列から要素を1つ無作為に返す */
+function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+/** Fisher-Yatesで並べ替えた新しい配列を返す（元配列は変更しない） */
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+/** チェビシェフ距離（8方向の歩数距離） */
+function chebyshev(x1, y1, x2, y2) {
+  return Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2));
+}
+
+/** 座標を 'x,y' 文字列キーにする（Set/Map用） */
+function keyOf(x, y) {
+  return x + ',' + y;
+}
 
 // ==== SECTION: DUNGEON-GEN ====
-// P3で実装
+// ダンジョン生成（decisions.md「仕様の実装定義」準拠・DOM非依存）
+// 32×20を4列×2行=8セクション（各8×10）に分割し、部屋を配置→L字通路で連結→BFS連結検証。
+
+const Dungeon = (() => {
+  const W = CONFIG.MAP_W;          // 32
+  const H = CONFIG.MAP_H;          // 20
+  const COLS = 4, ROWS = 2;        // セクション格子
+  const SW = W / COLS;             // セクション幅 8
+  const SH = H / ROWS;             // セクション高 10
+
+  // セクションの蛇行順 ((0,0)(1,0)(2,0)(3,0)→(3,1)(2,1)(1,1)(0,1))
+  const SNAKE = [
+    [0, 0], [1, 0], [2, 0], [3, 0],
+    [3, 1], [2, 1], [1, 1], [0, 1],
+  ];
+
+  /** タイル配列を全壁(0)で初期化 */
+  function blankTiles() {
+    const t = [];
+    for (let y = 0; y < H; y++) {
+      const row = new Array(W).fill(0);
+      t.push(row);
+    }
+    return t;
+  }
+
+  /** 部屋矩形内の床(1)を敷く */
+  function carveRoom(tiles, r) {
+    for (let y = r.y; y < r.y + r.h; y++) {
+      for (let x = r.x; x < r.x + r.w; x++) {
+        tiles[y][x] = 1;
+      }
+    }
+  }
+
+  /** 座標を盤面内側[1,30]×[1,18]にクランプ */
+  function clampX(x) { return Math.max(1, Math.min(W - 2, x)); }
+  function clampY(y) { return Math.max(1, Math.min(H - 2, y)); }
+
+  /** 通路1マス彫り込み：壁(0)のみ通路(2)に変える（部屋床1は上書きしない） */
+  function carveCorridorTile(tiles, x, y) {
+    const cx = clampX(x), cy = clampY(y);
+    if (tiles[cy][cx] === 0) tiles[cy][cx] = 2;
+  }
+
+  /** 水平方向に直線彫り */
+  function carveH(tiles, x1, x2, y) {
+    const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
+    for (let x = lo; x <= hi; x++) carveCorridorTile(tiles, x, y);
+  }
+
+  /** 垂直方向に直線彫り */
+  function carveV(tiles, y1, y2, x) {
+    const lo = Math.min(y1, y2), hi = Math.max(y1, y2);
+    for (let y = lo; y <= hi; y++) carveCorridorTile(tiles, x, y);
+  }
+
+  /** 2部屋中心をL字通路で連結（水平先行/垂直先行をランダムに選ぶ） */
+  function connect(tiles, a, b) {
+    const ax = Math.floor(a.x + a.w / 2), ay = Math.floor(a.y + a.h / 2);
+    const bx = Math.floor(b.x + b.w / 2), by = Math.floor(b.y + b.h / 2);
+    if (Math.random() < 0.5) {
+      // 水平先行
+      carveH(tiles, ax, bx, ay);
+      carveV(tiles, ay, by, bx);
+    } else {
+      // 垂直先行
+      carveV(tiles, ay, by, ax);
+      carveH(tiles, ax, bx, by);
+    }
+  }
+
+  /** 部屋の床タイル一覧を返す */
+  function roomFloors(r) {
+    const out = [];
+    for (let y = r.y; y < r.y + r.h; y++) {
+      for (let x = r.x; x < r.x + r.w; x++) out.push({ x, y });
+    }
+    return out;
+  }
+
+  /** BFSで start から全床到達可能か検証（4近傍・床は1/2） */
+  function allReachable(tiles, start, rooms, stairs) {
+    const seen = new Set([keyOf(start.x, start.y)]);
+    const q = [[start.x, start.y]];
+    while (q.length) {
+      const [x, y] = q.pop();
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (const [dx, dy] of dirs) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const k = keyOf(nx, ny);
+        if (tiles[ny][nx] !== 0 && !seen.has(k)) { seen.add(k); q.push([nx, ny]); }
+      }
+    }
+    if (!seen.has(keyOf(stairs.x, stairs.y))) return false;
+    for (const r of rooms) {
+      for (let y = r.y; y < r.y + r.h; y++) {
+        for (let x = r.x; x < r.x + r.w; x++) {
+          if (tiles[y][x] !== 0 && !seen.has(keyOf(x, y))) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  /** 1回分の生成試行（連結保証なし。失敗時null） */
+  function tryGenerate(floorNo) {
+    const tiles = blankTiles();
+
+    // a. セクションを randInt(4,7) 個選ぶ
+    const roomCount = randInt(CONFIG.ROOMS_MIN, CONFIG.ROOMS_MAX); // 4..7
+    const chosen = shuffle(SNAKE).slice(0, roomCount);
+
+    // b. 各セクション内部に部屋を1つ配置（セクションは蛇行順に並べ直す）
+    const rooms = [];
+    const orderedSecs = SNAKE.filter(s => chosen.some(c => c[0] === s[0] && c[1] === s[1]));
+    for (const [sc, sr] of orderedSecs) {
+      const sx = sc * SW;        // セクション左上x（0,8,16,24）
+      const sy = sr * SH;        // セクション左上y（0,10）
+      const w = randInt(CONFIG.ROOM_MIN, CONFIG.ROOM_MAX_W); // 3..6
+      const h = randInt(CONFIG.ROOM_MIN, CONFIG.ROOM_MAX_H); // 3..6
+      // 境界から最低1マス内側：x∈[sx+1, sx+SW-1-w], y∈[sy+1, sy+SH-1-h]
+      const rx = randInt(sx + 1, sx + SW - 1 - w);
+      const ry = randInt(sy + 1, sy + SH - 1 - h);
+      const r = { x: rx, y: ry, w, h };
+      carveRoom(tiles, r);
+      rooms.push(r);
+    }
+
+    // c. 蛇行順で隣接する部屋をL字通路で接続（rooms は orderedSecs と同順）
+    for (let i = 0; i + 1 < rooms.length; i++) connect(tiles, rooms[i], rooms[i + 1]);
+    // 35%で非隣接の2部屋をもう1本接続
+    if (rooms.length >= 3 && Math.random() < 0.35) {
+      const i = randInt(0, rooms.length - 1);
+      let j = randInt(0, rooms.length - 1);
+      // |i-j|>=2 の非隣接ペアを探す（数回試行）
+      let guard = 8;
+      while (Math.abs(i - j) < 2 && guard-- > 0) j = randInt(0, rooms.length - 1);
+      if (Math.abs(i - j) >= 2) connect(tiles, rooms[i], rooms[j]);
+    }
+
+    // 外周1マスは必ず壁（万一通路が触れていたら壁へ戻す）
+    for (let x = 0; x < W; x++) { tiles[0][x] = 0; tiles[H - 1][x] = 0; }
+    for (let y = 0; y < H; y++) { tiles[y][0] = 0; tiles[y][W - 1] = 0; }
+
+    // start部屋・stairs部屋を先に決める（別部屋）
+    if (rooms.length < 2) return null;
+    const startRoomIdx = randInt(0, rooms.length - 1);
+    let stairsRoomIdx = randInt(0, rooms.length - 1);
+    let guard = 12;
+    while (stairsRoomIdx === startRoomIdx && guard-- > 0) stairsRoomIdx = randInt(0, rooms.length - 1);
+    if (stairsRoomIdx === startRoomIdx) return null;
+
+    const start = pick(roomFloors(rooms[startRoomIdx]));
+    const stairs = pick(roomFloors(rooms[stairsRoomIdx]));
+
+    // e. BFS連結検証
+    if (!allReachable(tiles, start, rooms, stairs)) return null;
+
+    return { tiles, rooms, start, stairs, startRoomIdx };
+  }
+
+  /**
+   * フロアを生成する。
+   * @param {number} floorNo - 階数（1始まり）
+   * @returns {{tiles,rooms,stairs,start,items,traps,enemies}}
+   */
+  function generate(floorNo) {
+    let base = null;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      base = tryGenerate(floorNo);
+      if (base) break;
+    }
+    if (!base) throw new Error('ダンジョン生成に失敗（50回）');
+    const { tiles, rooms, start, stairs, startRoomIdx } = base;
+
+    // 占有集合（重複配置防止）。start/stairs を先に予約
+    const used = new Set([keyOf(start.x, start.y), keyOf(stairs.x, stairs.y)]);
+
+    // 全部屋床の候補プール
+    const allFloors = [];
+    for (const r of rooms) for (const c of roomFloors(r)) allFloors.push(c);
+
+    // --- items: randInt(2,4)個。部屋床のみ・重複なし ---
+    const itemKinds = Object.keys(DATA.ITEMS).filter(
+      k => (DATA.ITEMS[k].minF ?? 1) <= floorNo
+    );
+    const itemCount = randInt(CONFIG.ITEM_MIN, CONFIG.ITEM_MAX);
+    const items = [];
+    const itemPool = shuffle(allFloors);
+    for (const c of itemPool) {
+      if (items.length >= itemCount) break;
+      if (used.has(keyOf(c.x, c.y))) continue;
+      items.push({ x: c.x, y: c.y, kind: pick(itemKinds) });
+      used.add(keyOf(c.x, c.y));
+    }
+
+    // --- traps: 個数は§5.2式・部屋床のみ・start/stairs/itemsと重複なし ---
+    const trapCount = Math.min(
+      randInt(CONFIG.TRAP_MIN, CONFIG.TRAP_MAX) + Math.floor((floorNo - 1) / CONFIG.TRAP_PER_FLOORS),
+      CONFIG.TRAP_CAP
+    );
+    const trapKinds = Object.keys(DATA.TRAPS);
+    const traps = [];
+    const trapPool = shuffle(allFloors);
+    for (const c of trapPool) {
+      if (traps.length >= trapCount) break;
+      if (used.has(keyOf(c.x, c.y))) continue;
+      traps.push({ x: c.x, y: c.y, kind: pick(trapKinds), revealed: false });
+      used.add(keyOf(c.x, c.y));
+    }
+
+    // --- enemies: randInt(3,5)体。部屋床・startからチェビシェフ3以上・相互重複なし ---
+    const enemyKinds = Object.keys(DATA.ENEMIES).filter(
+      k => DATA.ENEMIES[k].minF <= floorNo && floorNo <= DATA.ENEMIES[k].maxF
+    );
+    const enemyCount = randInt(CONFIG.ENEMY_INIT_MIN, CONFIG.ENEMY_INIT_MAX);
+    const enemies = [];
+    const enemyUsed = new Set([keyOf(start.x, start.y)]); // 敵同士のみ重複防止（アイテム/罠とは重なってよい）
+    const enemyPool = shuffle(allFloors);
+    for (const c of enemyPool) {
+      if (enemies.length >= enemyCount) break;
+      if (enemyUsed.has(keyOf(c.x, c.y))) continue;
+      if (chebyshev(c.x, c.y, start.x, start.y) < 3) continue;
+      enemies.push(Core.makeEnemy(pick(enemyKinds), floorNo, c.x, c.y));
+      enemyUsed.add(keyOf(c.x, c.y));
+    }
+
+    return { tiles, rooms, stairs, start, items, traps, enemies };
+  }
+
+  return { generate, _startRoomIdxOf: null };
+})();
 
 // ==== SECTION: TURN-CORE ====
-// P4で実装
+// ターン中核（数値計算・run生成・フロア遷移・視界）。DOM非依存。
+// P4が move/attack/use 等の Core.act を拡張する前提で、構造は素直に保つ。
+
+const Core = {
+  /**
+   * レベル n から n+1 への必要経験値（§8.1）。
+   * @param {number} n
+   * @returns {number}
+   */
+  xpNeed(n) {
+    return Math.ceil(CONFIG.XP_BASE * Math.pow(CONFIG.XP_MULT, n - 1));
+  },
+
+  /**
+   * B16以深の基礎値補正（§5.2）。floorNo<DEEP_FLOOR は素通し。
+   * @param {number} base - 基礎値
+   * @param {number} floorNo - 階数
+   * @returns {number}
+   */
+  deepScale(base, floorNo) {
+    if (floorNo < CONFIG.DEEP_FLOOR) return base;
+    return Math.ceil(base * (1 + CONFIG.DEEP_RATE * (floorNo - CONFIG.DEEP_BASE_FLOOR)));
+  },
+
+  /**
+   * ダメージ計算（§7.2）。最低1保証。
+   * @param {number} atk
+   * @param {number} def
+   * @returns {number}
+   */
+  calcDamage(atk, def) {
+    return Math.max(1, atk - def + randInt(-1, 1));
+  },
+
+  /**
+   * 敵インスタンスを生成（hp/atk/def/exp に深層補正を適用、maxHp=hp）。
+   * @param {string} kind - DATA.ENEMIES のキー
+   * @param {number} floorNo
+   * @param {number} x
+   * @param {number} y
+   * @returns {object}
+   */
+  makeEnemy(kind, floorNo, x, y) {
+    const d = DATA.ENEMIES[kind];
+    const hp = this.deepScale(d.hp, floorNo);
+    return {
+      x, y, kind,
+      hp,
+      maxHp: hp,
+      atk: this.deepScale(d.atk, floorNo),
+      def: this.deepScale(d.def, floorNo),
+      exp: this.deepScale(d.exp, floorNo),
+      stun: 0,
+      cool: 0,
+    };
+  },
+
+  /**
+   * 新規プレイのrunオブジェクトを生成（B1生成済み・§8.1初期値）。
+   * @param {string} name - プレイヤー名
+   * @returns {object} run
+   */
+  newRun(name) {
+    const d = Dungeon.generate(1);
+    return {
+      name,
+      floor: 1,
+      deepest: 1,
+      turn: 0,
+      spawnTick: 0,
+      over: false,
+      giveup: false,
+      deathCause: '',
+      player: {
+        x: d.start.x,
+        y: d.start.y,
+        lv: 1,
+        hp: CONFIG.PLAYER_HP,
+        maxHp: CONFIG.PLAYER_HP,
+        atkBase: CONFIG.PLAYER_ATK,
+        defBase: CONFIG.PLAYER_DEF,
+        satiety: CONFIG.PLAYER_SATIETY,
+        maxSatiety: CONFIG.PLAYER_SATIETY,
+        xp: 0,
+        inv: [{ kind: 'hachimitsu' }],
+        weapon: null,
+        shield: null,
+        facing: { dx: 0, dy: 1 },
+        sleep: 0,
+      },
+      map: { tiles: d.tiles },
+      rooms: d.rooms,
+      stairs: d.stairs,
+      start: d.start,
+      items: d.items,
+      traps: d.traps,
+      enemies: d.enemies,
+      explored: Core._blankBool(),
+      stairsSeen: false,
+      bubbleText: '',
+    };
+  },
+
+  /**
+   * 次のフロアへ降りる（ステータス・持ち物は維持。マップ等を差し替え）。
+   * @param {object} run
+   */
+  nextFloor(run) {
+    run.floor++;
+    run.deepest = Math.max(run.deepest, run.floor);
+    const d = Dungeon.generate(run.floor);
+    run.map = { tiles: d.tiles };
+    run.rooms = d.rooms;
+    run.stairs = d.stairs;
+    run.start = d.start;
+    run.items = d.items;
+    run.traps = d.traps;
+    run.enemies = d.enemies;
+    run.player.x = d.start.x;
+    run.player.y = d.start.y;
+    run.explored = Core._blankBool();
+    run.stairsSeen = false;
+    run.spawnTick = 0;
+  },
+
+  /**
+   * 座標を含む部屋オブジェクトを返す（矩形判定。なければnull）。
+   * @param {object} run
+   * @param {number} x
+   * @param {number} y
+   * @returns {?object}
+   */
+  roomAt(run, x, y) {
+    for (const r of run.rooms) {
+      if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r;
+    }
+    return null;
+  },
+
+  /**
+   * 現在の視界タイル集合を返す（§6.2）。
+   * 部屋内→その部屋の全タイル＋外周1マスの縁／通路→中心3×3。
+   * @param {object} run
+   * @returns {Set<string>} 'x,y' のSet
+   */
+  computeVisible(run) {
+    const p = run.player;
+    const vis = new Set();
+    const W = CONFIG.MAP_W, H = CONFIG.MAP_H;
+    const add = (x, y) => { if (x >= 0 && y >= 0 && x < W && y < H) vis.add(keyOf(x, y)); };
+    const room = this.roomAt(run, p.x, p.y);
+    if (room) {
+      // 部屋全タイル＋外周1マスの縁
+      for (let y = room.y - 1; y <= room.y + room.h; y++) {
+        for (let x = room.x - 1; x <= room.x + room.w; x++) add(x, y);
+      }
+    } else {
+      // 通路：中心3×3
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) add(p.x + dx, p.y + dy);
+      }
+    }
+    return vis;
+  },
+
+  /** 20×32 の false 2次元配列（探索済みフラグ用） */
+  _blankBool() {
+    const a = [];
+    for (let y = 0; y < CONFIG.MAP_H; y++) a.push(new Array(CONFIG.MAP_W).fill(false));
+    return a;
+  },
+};
 
 // ==== CORE-END ====
 
