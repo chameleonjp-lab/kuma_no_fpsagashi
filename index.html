@@ -193,6 +193,13 @@ body {
   transform: translate(2px, 2px);
 }
 
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  box-shadow: 1px 1px 0 #000;
+  transform: translate(2px, 2px);
+}
+
 .btn-primary {
   background: var(--clr-green);
   border-color: #5ab040;
@@ -601,6 +608,46 @@ body {
   color: var(--clr-accent);
   text-align: center;
   margin-top: 4px;
+}
+
+/* ==== ランキング一覧の行（§9.4。display_nameはJS側でtextContent描画） ==== */
+.rank-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+  padding: 3px 2px;
+  border-bottom: 1px solid #3a2a14;
+}
+.rank-row:last-child {
+  border-bottom: none;
+}
+.rank-row .rank-no {
+  flex: 0 0 auto;
+  width: 38px;
+  color: var(--clr-muted);
+  text-align: right;
+}
+.rank-row .rank-name {
+  flex: 1 1 auto;
+  color: var(--clr-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rank-row .rank-score {
+  flex: 0 0 auto;
+  color: var(--clr-gold);
+}
+.rank-row.is-me .rank-name {
+  color: var(--clr-accent);
+  font-weight: bold;
+}
+.rank-empty {
+  font-size: 13px;
+  color: var(--clr-muted);
+  text-align: center;
+  padding: 6px 0;
 }
 
 .result-btns {
@@ -2553,6 +2600,7 @@ const Game = {
     // 独り言の吹き出しを消してから結果画面へ
     run.bubbleText = '';
     UI.showScreen('result');
+    Ranking.onResultShown(run.deepest, run.name);
   },
 };
 
@@ -3496,7 +3544,228 @@ const UI = (() => {
 })();
 
 // ==== SECTION: SUPABASE ====
-// P7で実装
+/**
+ * ランキング連携（§9）。supabase-js を使わず REST を直接 fetch する（decisions.md / johba 作法）。
+ * - 送信RPC: submit_score / 取得RPC: get_best_score_ranking（CONFIG の接続値のみ参照）。
+ * - display_name は外部データのため必ず textContent で描画（innerHTML 禁止・XSS対策・kuma固有ルール）。
+ * - 例外は try/catch で隔離し、結果画面の進行（もう一度・ホーム・シェア）を止めない（§11）。
+ */
+const Ranking = (() => {
+  // ---- モジュール状態 ----
+  let finalScore  = 0;     // 今回プレイの最深到達階
+  let playerName  = '';    // 今回プレイのプレイヤー名（送信値・自分の行判定に使用）
+  let hasSubmitted = false; // 送信成功済みか（成功後は再送防止）
+  let submitting  = false; // 送信処理の進行中フラグ（二重送信防止）
+
+  // ---- DOM 参照（結果画面の固定要素） ----
+  const elStatus  = document.getElementById('submitStatus');
+  const elSubmit  = document.getElementById('btnSubmitScore');
+  const elRetry   = document.getElementById('btnRetrySubmit');
+  const elBox     = document.getElementById('rankingBox');
+  const elYour    = document.getElementById('yourRank');
+
+  /**
+   * SupabaseのRPCをRESTで叩く（johbaと同一作法）。
+   * 3ヘッダ必須（apikey / Authorization Bearer / Content-Type）。
+   * AbortController で CONFIG.RPC_TIMEOUT_MS タイムアウト。
+   * @param {string} fn - RPC関数名
+   * @param {object} body - リクエストボディ
+   * @returns {Promise<any>} RPCの戻りJSON
+   */
+  async function supabaseRpc(fn, body) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), CONFIG.RPC_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+        method: 'POST',
+        headers: {
+          apikey: CONFIG.SUPABASE_KEY,
+          Authorization: `Bearer ${CONFIG.SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error(`RPC ${fn} failed: ${res.status}`);
+      return await res.json();
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  /**
+   * ランキング一覧を再構築して #rankingBox に描画する。
+   * display_name は外部データのため必ず textContent で組み立てる（innerHTML 禁止）。
+   * スコアは「B◯F」形式（§9.4）。上位 CONFIG.RANK_SHOW 件のみ表示。
+   * @param {Array} rows - get_best_score_ranking の戻り行配列
+   */
+  function renderRanking(rows) {
+    // 既存の中身（タイトル含む）をクリアして再構築
+    elBox.textContent = '';
+    const title = document.createElement('div');
+    title.className = 'ranking-title';
+    title.textContent = '▶ ランキング';
+    elBox.appendChild(title);
+
+    const list = Array.isArray(rows) ? rows : [];
+    if (list.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'rank-empty';
+      empty.textContent = 'まだ記録がありません';
+      elBox.appendChild(empty);
+      return;
+    }
+
+    const shown = list.slice(0, CONFIG.RANK_SHOW);
+    for (const r of shown) {
+      // フィールド名は防御的に読む（rank_no/rank・display_name/name）
+      const rankNo = r.rank_no ?? r.rank;
+      const name   = r.display_name ?? r.name ?? '';
+      const score  = r.score;
+
+      const row = document.createElement('div');
+      row.className = 'rank-row';
+      // 自分の行を強調（同名は近似。decisions.md）
+      if (hasSubmitted && name === playerName) row.classList.add('is-me');
+
+      const noEl = document.createElement('span');
+      noEl.className = 'rank-no';
+      noEl.textContent = `${rankNo}位`;
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'rank-name';
+      nameEl.textContent = name; // ← 外部データ。textContent のみ（XSS対策）
+
+      const scoreEl = document.createElement('span');
+      scoreEl.className = 'rank-score';
+      scoreEl.textContent = `B${score}F`;
+
+      row.appendChild(noEl);
+      row.appendChild(nameEl);
+      row.appendChild(scoreEl);
+      elBox.appendChild(row);
+    }
+  }
+
+  /**
+   * ランキングを取得して描画し、送信済みなら「あなた：◯位」を算出する（§9.4）。
+   * 取得は CONFIG.RANK_FETCH_LIMIT(100) 件、表示は上位 CONFIG.RANK_SHOW(10) 件。
+   * 失敗してもゲーム進行を妨げない。
+   * @returns {Promise<void>}
+   */
+  async function loadRanking() {
+    // 読み込み中表示（タイトルは renderRanking 側で再生成するため簡易表示）
+    elBox.textContent = '';
+    const title = document.createElement('div');
+    title.className = 'ranking-title';
+    title.textContent = '▶ ランキング';
+    elBox.appendChild(title);
+    const loading = document.createElement('div');
+    loading.className = 'rank-empty';
+    loading.textContent = '読み込み中…';
+    elBox.appendChild(loading);
+
+    try {
+      const rows = await supabaseRpc('get_best_score_ranking', {
+        p_game_slug: CONFIG.GAME_SLUG,
+        p_limit: CONFIG.RANK_FETCH_LIMIT,
+      });
+      renderRanking(rows);
+
+      // 「あなた：◯位」：送信済みのときのみ算出（§9.4・近似実装はdecisions.md）
+      if (hasSubmitted) {
+        const list = Array.isArray(rows) ? rows : [];
+        const mine = list.find((r) => (r.display_name ?? r.name ?? '') === playerName);
+        if (!mine) {
+          // 100件取得に自分が無い＝圏外
+          elYour.textContent = 'あなた：100位圏外';
+        } else {
+          const rank = mine.rank_no ?? mine.rank;
+          if (rank > CONFIG.RANK_SHOW) {
+            elYour.textContent = `あなた：${rank}位`;
+          } else {
+            // 上位表示内に出ているので欄外表示は不要
+            elYour.textContent = '';
+          }
+        }
+      }
+    } catch (e) {
+      // §9.4: 取得失敗は一覧欄に表示し、進行は妨げない
+      elBox.textContent = '';
+      const t2 = document.createElement('div');
+      t2.className = 'ranking-title';
+      t2.textContent = '▶ ランキング';
+      elBox.appendChild(t2);
+      const err = document.createElement('div');
+      err.className = 'rank-empty';
+      err.textContent = 'ランキングを取得できませんでした';
+      elBox.appendChild(err);
+    }
+  }
+
+  /**
+   * スコアを送信する（#btnSubmitScore / #btnRetrySubmit から呼ばれる）。
+   * 二重送信防止：送信中・送信成功済みは弾く。成功後はボタンを無効のまま据え置く（§9.3）。
+   * @returns {Promise<void>}
+   */
+  async function submit() {
+    if (hasSubmitted || submitting) return; // 二重送信防止
+    submitting = true;
+    elSubmit.disabled = true;
+    elStatus.textContent = '送信中…';
+    elRetry.classList.add('hidden');
+
+    try {
+      await supabaseRpc('submit_score', {
+        p_display_name: playerName,
+        p_game_slug:    CONFIG.GAME_SLUG,
+        p_score:        finalScore,
+        p_client_version: CONFIG.CLIENT_VERSION,
+      });
+      hasSubmitted = true;
+      elStatus.textContent = '送信しました';
+      // 成功後は再送防止のためボタンは disabled のまま据え置く
+      await loadRanking(); // 最新化＋「あなた：◯位」算出
+    } catch (e) {
+      // 失敗：状態表示＋再試行ボタン。hasSubmitted は false のまま＝再実行可
+      elStatus.textContent = '送信に失敗しました';
+      elRetry.classList.remove('hidden');
+      // 運用時のエラー可視化（console.log は禁止・warn のみ許容。decisions.md）
+      console.warn('submit_score failed:', e);
+    } finally {
+      submitting = false;
+    }
+  }
+
+  /**
+   * 結果画面を表示した時の入口（Game.endRun から呼ばれる）。
+   * 送信UIを初期状態へ戻し、ランキングは読み込み専用で先に取得する（自動送信はしない・§9.3-1）。
+   * @param {number} score - 最深到達階（run.deepest）
+   * @param {string} name - プレイヤー名（run.name）
+   */
+  function onResultShown(score, name) {
+    finalScore   = score;
+    playerName   = name;
+    hasSubmitted = false;
+    submitting   = false;
+
+    // 送信UIを初期状態へ
+    elStatus.textContent = 'ランキングに登録できます';
+    elSubmit.disabled = false;
+    elSubmit.classList.remove('hidden');
+    elRetry.classList.add('hidden');
+    elYour.textContent = '';
+
+    // ランキングは閲覧用に先読み（送信はしない）。失敗してもゲーム進行を止めない。
+    loadRanking().catch(() => {});
+  }
+
+  // ---- 配線（SUPABASEセクション内に閉じる） ----
+  elSubmit.addEventListener('click', () => { submit(); });
+  elRetry.addEventListener('click', () => { submit(); });
+
+  return { onResultShown, submit, loadRanking, supabaseRpc };
+})();
 
 // ==== SECTION: BOOT ====
 /**
