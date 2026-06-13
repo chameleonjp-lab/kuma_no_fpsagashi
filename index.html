@@ -1649,6 +1649,502 @@ const Core = {
     return vis;
   },
 
+  // ---- act: 1ターン解決（プレイヤー行動→敵フェーズ→ターン経過→追加湧き） ----
+  // CORE内のためDOM/Render/UI/Log/G参照禁止。runを直接変異し、events配列を返す。
+
+  /** 盤内かつ床(1/2)か */
+  _isFloor(run, x, y) {
+    if (x < 0 || y < 0 || x >= CONFIG.MAP_W || y >= CONFIG.MAP_H) return false;
+    return run.map.tiles[y][x] !== 0;
+  },
+
+  /** 指定マスに敵がいれば返す（なければnull） */
+  _enemyAt(run, x, y) {
+    for (const e of run.enemies) if (e.x === x && e.y === y) return e;
+    return null;
+  },
+
+  /**
+   * (x,y)から(dx,dy)方向への1歩が合法か（盤内・床・プレイヤー/他敵不在・斜め角抜け禁止）。
+   * mover を渡すと自分自身は障害物から除外する。
+   */
+  _canStep(run, x, y, dx, dy, mover) {
+    const nx = x + dx, ny = y + dy;
+    if (!this._isFloor(run, nx, ny)) return false;
+    // 斜めは両直交隣がともに床のときのみ（角抜け禁止）
+    if (dx !== 0 && dy !== 0) {
+      if (!this._isFloor(run, x + dx, y) || !this._isFloor(run, x, y + dy)) return false;
+    }
+    // プレイヤー
+    if (run.player.x === nx && run.player.y === ny) return false;
+    // 他敵
+    const occ = this._enemyAt(run, nx, ny);
+    if (occ && occ !== mover) return false;
+    return true;
+  },
+
+  /**
+   * 斜め攻撃の角抜け判定。(x,y)から(dx,dy)へ攻撃が通るか（斜めは両直交隣が床のとき）。
+   */
+  _attackClear(run, x, y, dx, dy) {
+    if (dx !== 0 && dy !== 0) {
+      if (!this._isFloor(run, x + dx, y) || !this._isFloor(run, x, y + dy)) return false;
+    }
+    return true;
+  },
+
+  /**
+   * プレイヤーの撃破経験値を加算しレベル処理（複数レベル一括・Lv30打ち止め）。
+   * @returns {string[]} 発生したレベルアップメッセージ
+   */
+  _gainXp(run, amount) {
+    const p = run.player;
+    p.xp += amount;
+    const msgs = [];
+    while (p.lv < CONFIG.LV_MAX && p.xp >= this.xpNeed(p.lv)) {
+      p.xp -= this.xpNeed(p.lv);
+      p.lv++;
+      p.maxHp += CONFIG.LVUP_HP;
+      p.hp = Math.min(p.hp + CONFIG.LVUP_HP, p.maxHp);
+      p.atkBase = CONFIG.PLAYER_ATK + (p.lv - 1);
+      p.defBase = CONFIG.PLAYER_DEF + Math.floor(p.lv / CONFIG.LVUP_DEF_EVERY);
+      msgs.push('レベル ' + p.lv + ' になった！');
+    }
+    return msgs;
+  },
+
+  /** プレイヤーの総攻撃力（基礎＋武器補正） */
+  _playerAtk(run) {
+    const p = run.player;
+    return p.atkBase + (p.weapon ? (DATA.ITEMS[p.weapon.kind].atk || 0) : 0);
+  },
+
+  /** プレイヤーの総防御力（基礎＋盾補正） */
+  _playerDef(run) {
+    const p = run.player;
+    return p.defBase + (p.shield ? (DATA.ITEMS[p.shield.kind].def || 0) : 0);
+  },
+
+  /**
+   * ターンを1つ解決する。
+   * @param {object} run
+   * @param {object} action - {type:'move',dx,dy}|{type:'attack'}|{type:'wait'}
+   *                          |{type:'descend'}|{type:'giveup'}|{type:'use'|'place'|'throw',...}
+   * @returns {{events:Array, turnSpent:boolean}}
+   */
+  act(run, action) {
+    const events = [];
+    const msg = (text) => events.push({ t: 'msg', text });
+    const p = run.player;
+
+    // giveup は眠り中・いつでも受け付ける（ターン消費なし）
+    if (action.type === 'giveup') {
+      run.over = true;
+      run.giveup = true;
+      return { events, turnSpent: false };
+    }
+
+    // 眠り中は行動内容を無視して「眠りターン」を消費
+    if (p.sleep > 0) {
+      msg('熊はねむっている…');
+      p.sleep--;
+      this._resolveTurn(run, events);
+      return { events, turnSpent: true };
+    }
+
+    let turnSpent = false;
+
+    switch (action.type) {
+      case 'move': {
+        // 向きは常に更新
+        p.facing = { dx: action.dx, dy: action.dy };
+        const nx = p.x + action.dx, ny = p.y + action.dy;
+        // 移動先が壁/敵 → ターン消費なし・メッセージなし
+        if (!this._canStep(run, p.x, p.y, action.dx, action.dy, null)) {
+          return { events, turnSpent: false };
+        }
+        // 移動成立
+        p.x = nx; p.y = ny;
+        turnSpent = true;
+        this._onLand(run, events);
+        break;
+      }
+      case 'attack': {
+        // 常にターン消費。対象=facingの1マス先（斜めは角抜け禁止）
+        turnSpent = true;
+        const f = p.facing;
+        const tx = p.x + f.dx, ty = p.y + f.dy;
+        const clear = this._attackClear(run, p.x, p.y, f.dx, f.dy);
+        const target = clear ? this._enemyAt(run, tx, ty) : null;
+        if (target) {
+          const dmg = this.calcDamage(this._playerAtk(run), target.def);
+          target.hp -= dmg;
+          const ename = DATA.ENEMIES[target.kind].name;
+          msg(ename + 'に ' + dmg + 'ダメージ');
+          if (target.hp <= 0) {
+            msg(ename + 'をたおした');
+            const idx = run.enemies.indexOf(target);
+            if (idx >= 0) run.enemies.splice(idx, 1);
+            for (const m of this._gainXp(run, target.exp)) msg(m);
+          } else if (DATA.ENEMIES[target.kind].ai === 'counter') {
+            // ヤマアラシは生存時のみ固定1反撃
+            p.hp -= 1;
+            msg('とげが刺さった！');
+            if (p.hp <= 0) {
+              run.over = true;
+              run.deathCause = 'とげとげヤマアラシ';
+              msg('熊はたおれた…');
+              return { events, turnSpent: true };
+            }
+          }
+        } else {
+          msg('熊は空振りした');
+        }
+        break;
+      }
+      case 'wait': {
+        turnSpent = true;
+        break;
+      }
+      case 'descend': {
+        // 階段タイル上のときのみ。ターン消費なし（新フロアで敵フェーズを回さない）
+        if (p.x === run.stairs.x && p.y === run.stairs.y) {
+          this.nextFloor(run);
+          events.push({ t: 'descended' });
+          msg('B' + run.floor + 'F へ降りた');
+        }
+        return { events, turnSpent: false };
+      }
+      case 'use':
+      case 'place':
+      case 'throw': {
+        // TODO(P5): アイテム使用・設置・投擲を実装する
+        return { events, turnSpent: false };
+      }
+      default:
+        return { events, turnSpent: false };
+    }
+
+    if (run.over) return { events, turnSpent };
+    if (turnSpent) this._resolveTurn(run, events);
+    return { events, turnSpent };
+  },
+
+  /**
+   * 移動着地処理（順: 拾得→罠→階段検出）。run/eventsを変異。
+   */
+  _onLand(run, events) {
+    const p = run.player;
+    const msg = (text) => events.push({ t: 'msg', text });
+
+    // ① アイテム拾得
+    const itemIdx = run.items.findIndex(it => it.x === p.x && it.y === p.y);
+    if (itemIdx >= 0) {
+      const it = run.items[itemIdx];
+      const iname = DATA.ITEMS[it.kind].name;
+      if (p.inv.length < CONFIG.INV_MAX) {
+        p.inv.push({ kind: it.kind });
+        run.items.splice(itemIdx, 1);
+        msg(iname + 'を拾った');
+      } else {
+        msg('持ちものがいっぱいで拾えない');
+      }
+    }
+
+    // ② 罠（revealed問わず踏んだら発動。発動後も残る）
+    const trap = run.traps.find(t => t.x === p.x && t.y === p.y);
+    if (trap) {
+      trap.revealed = true;
+      const td = DATA.TRAPS[trap.kind];
+      msg(td.name + 'だ！');
+      if (td.dmg) {
+        p.hp -= td.dmg;
+        if (p.hp <= 0) {
+          run.over = true;
+          run.deathCause = 'とげの床';
+          msg('熊はたおれた…');
+          return;
+        }
+      } else if (td.satiety) {
+        p.satiety = Math.max(0, p.satiety - td.satiety);
+      } else if (td.warp) {
+        const dest = this._randomEmptyFloor(run);
+        if (dest) { p.x = dest.x; p.y = dest.y; }
+        msg('飛ばされた！');
+      }
+    }
+
+    // ③ 階段タイル検出（自動では降りない）
+    if (p.x === run.stairs.x && p.y === run.stairs.y) {
+      events.push({ t: 'stairs' });
+    }
+  },
+
+  /**
+   * 空き床（敵・階段・プレイヤー以外の床）から無作為に1マス返す（なければnull）。
+   * ぐるぐる落とし穴の転移先に使用。
+   */
+  _randomEmptyFloor(run) {
+    const p = run.player;
+    const cand = [];
+    for (let y = 0; y < CONFIG.MAP_H; y++) {
+      for (let x = 0; x < CONFIG.MAP_W; x++) {
+        if (run.map.tiles[y][x] === 0) continue;
+        if (x === run.stairs.x && y === run.stairs.y) continue;
+        if (x === p.x && y === p.y) continue;
+        if (this._enemyAt(run, x, y)) continue;
+        cand.push({ x, y });
+      }
+    }
+    return cand.length ? pick(cand) : null;
+  },
+
+  /**
+   * ターン消費時の後続処理（敵フェーズ→ターン経過→追加湧き）。
+   */
+  _resolveTurn(run, events) {
+    this._enemyPhase(run, events);
+    if (run.over) return;
+    this._elapse(run, events);
+    if (run.over) return;
+    this._spawnPhase(run);
+  },
+
+  /**
+   * 敵フェーズ（配列順に各敵1行動）。run/eventsを変異。
+   */
+  _enemyPhase(run, events) {
+    const msg = (text) => events.push({ t: 'msg', text });
+    const p = run.player;
+    // 配列のスナップショットで走査（撃破=プレイヤー側のみ。敵は死なない）
+    const list = run.enemies.slice();
+    for (const e of list) {
+      if (run.over) return;
+      if (run.enemies.indexOf(e) < 0) continue; // 既に除去済みは無視
+      // しびれ（stun）優先
+      if (e.stun > 0) { e.stun--; continue; }
+
+      const def = DATA.ENEMIES[e.kind];
+      const dist = chebyshev(e.x, e.y, p.x, p.y);
+      const sameRoom = (() => {
+        const r1 = this.roomAt(run, e.x, e.y);
+        const r2 = this.roomAt(run, p.x, p.y);
+        return r1 && r2 && r1 === r2;
+      })();
+      const inSight = sameRoom || dist <= 1;
+      const ddx = Math.sign(p.x - e.x), ddy = Math.sign(p.y - e.y);
+      const canAttack = dist === 1 && this._attackClear(run, e.x, e.y, ddx, ddy);
+
+      // カラスは1ターンおき（coolが立つターンは何もしない）
+      if (def.ai === 'slow') {
+        const skip = e.cool === 1;
+        e.cool = e.cool ? 0 : 1;
+        if (skip) continue;
+      }
+
+      // 攻撃可能なら攻撃（fox以外はまず攻撃。foxも隣接時は攻撃する）
+      if (canAttack) {
+        this._enemyAttack(run, e, events);
+        continue;
+      }
+
+      // 移動系AI
+      if (def.ai === 'fox') {
+        // プレイヤーを追わず、最寄りアイテムへ貪欲接近。なければ徘徊
+        const goal = this._nearestItem(run, e);
+        if (goal) this._greedyStep(run, e, Math.sign(goal.x - e.x), Math.sign(goal.y - e.y));
+        else this._wander(run, e);
+        continue;
+      }
+
+      if (def.ai === 'boar') {
+        // 直線上に遮蔽なしでプレイヤーがいれば最大2マス突進
+        if (this._boarCharge(run, e)) continue;
+        // それ以外は charge と同じ
+        if (inSight) this._greedyStep(run, e, ddx, ddy);
+        else this._wander(run, e);
+        continue;
+      }
+
+      // charge / counter / sleep（移動は共通の貪欲接近）
+      if (inSight) this._greedyStep(run, e, ddx, ddy);
+      else this._wander(run, e);
+    }
+  },
+
+  /**
+   * 敵の攻撃をプレイヤーへ与える。HP0なら死亡処理し打ち切り。
+   */
+  _enemyAttack(run, e, events) {
+    const msg = (text) => events.push({ t: 'msg', text });
+    const p = run.player;
+    const def = DATA.ENEMIES[e.kind];
+    const dmg = this.calcDamage(e.atk, this._playerDef(run));
+    p.hp -= dmg;
+    msg(def.name + 'のこうげき！ ' + dmg + 'ダメージ');
+    if (p.hp <= 0) {
+      run.over = true;
+      run.deathCause = def.name;
+      msg('熊はたおれた…');
+      return;
+    }
+    // ねむりヘビ：命中時に確率で眠り
+    if (def.ai === 'sleep' && Math.random() < CONFIG.SLEEP_CHANCE) {
+      p.sleep = CONFIG.SLEEP_TURNS;
+      msg('熊はねむってしまった！');
+    }
+  },
+
+  /**
+   * 貪欲接近の1歩を試す（(dx,dy)→大きい軸単独→もう片軸 の順に合法手）。
+   */
+  _greedyStep(run, e, dx, dy) {
+    const tries = [];
+    if (dx !== 0 || dy !== 0) tries.push([dx, dy]);
+    // |差|が大きい軸単独 → もう片軸
+    const adx = Math.abs(run.player.x - e.x), ady = Math.abs(run.player.y - e.y);
+    if (adx >= ady) {
+      if (dx !== 0) tries.push([dx, 0]);
+      if (dy !== 0) tries.push([0, dy]);
+    } else {
+      if (dy !== 0) tries.push([0, dy]);
+      if (dx !== 0) tries.push([dx, 0]);
+    }
+    for (const [mx, my] of tries) {
+      if (this._canStep(run, e.x, e.y, mx, my, e)) { e.x += mx; e.y += my; return true; }
+    }
+    return false;
+  },
+
+  /**
+   * ランダム徘徊（8方向から1つ無作為に試し、合法なら移動）。
+   */
+  _wander(run, e) {
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+    const [dx, dy] = pick(dirs);
+    if (this._canStep(run, e.x, e.y, dx, dy, e)) { e.x += dx; e.y += dy; return true; }
+    return false;
+  },
+
+  /**
+   * フロアに残るアイテムのうち、敵に最も近いものを返す（チェビシェフ。なければnull）。
+   */
+  _nearestItem(run, e) {
+    let best = null, bestD = Infinity;
+    for (const it of run.items) {
+      const d = chebyshev(e.x, e.y, it.x, it.y);
+      if (d < bestD) { bestD = d; best = it; }
+    }
+    return best;
+  },
+
+  /**
+   * イノシシの突進。8方向いずれかの直線上に遮蔽なしでプレイヤーがいれば最大2マス進む。
+   * 突進したら true。
+   */
+  _boarCharge(run, e) {
+    const p = run.player;
+    const dx = p.x - e.x, dy = p.y - e.y;
+    // 直線（水平/垂直/斜め45度）でなければ不可
+    const straight = (dx === 0 && dy !== 0) || (dy === 0 && dx !== 0) || (Math.abs(dx) === Math.abs(dy) && dx !== 0);
+    if (!straight) return false;
+    const sx = Math.sign(dx), sy = Math.sign(dy);
+    const steps = Math.max(Math.abs(dx), Math.abs(dy));
+    // 間が全部床（壁/他敵/プレイヤーで遮られない）かを e〜p の手前まで確認
+    for (let i = 1; i < steps; i++) {
+      const cx = e.x + sx * i, cy = e.y + sy * i;
+      if (!this._isFloor(run, cx, cy)) return false;
+      // 斜めは各ステップの角抜けも禁止
+      if (sx !== 0 && sy !== 0 && (!this._isFloor(run, cx - sx, cy) || !this._isFloor(run, cx, cy - sy))) return false;
+      if (this._enemyAt(run, cx, cy)) return false;
+    }
+    // 最大2マス突進（1マスずつ・次マスが壁/敵/プレイヤーなら停止）
+    let moved = false;
+    for (let i = 0; i < 2; i++) {
+      if (!this._canStep(run, e.x, e.y, sx, sy, e)) break;
+      e.x += sx; e.y += sy; moved = true;
+    }
+    return moved;
+  },
+
+  /**
+   * ターン経過処理（§7.1の順: 満腹度→自然回復→状態異常→湧きカウント）。
+   * 状態異常（眠り）は act 冒頭で消費するためここでは扱わない。
+   */
+  _elapse(run, events) {
+    const msg = (text) => events.push({ t: 'msg', text });
+    const p = run.player;
+    run.turn++;
+
+    // 満腹度の減少
+    if (run.turn % CONFIG.HUNGER_EVERY_TURNS === 0) {
+      const before = p.satiety;
+      p.satiety = Math.max(0, p.satiety - 1);
+      // 31以上→30以下に下がった瞬間の警告
+      if (before > CONFIG.HUNGER_WARN && p.satiety <= CONFIG.HUNGER_WARN && !p.warned30) {
+        msg('おなかがすいてきた…');
+        p.warned30 = true;
+      }
+      // 0になった瞬間の警告
+      if (p.satiety === 0 && !p.warned0) {
+        msg('腹ぺこだ！はやく何か食べないと！');
+        p.warned0 = true;
+      }
+    }
+    // 警告フラグの解除（食料回復後の再警告のため）
+    if (p.satiety > CONFIG.HUNGER_WARN) p.warned30 = false;
+    if (p.satiety > 0) p.warned0 = false;
+
+    // 満腹度0：毎ターンHP-1
+    if (p.satiety === 0) {
+      p.hp -= 1;
+      if (p.hp <= 0) {
+        run.over = true;
+        run.deathCause = '飢え';
+        msg('熊はたおれた…');
+        return;
+      }
+    }
+
+    // 自然回復（満腹度1以上・REGEN周期・HP<最大）
+    if (p.satiety >= 1 && run.turn % CONFIG.REGEN_EVERY_TURNS === 0 && p.hp < p.maxHp) {
+      p.hp += 1;
+    }
+  },
+
+  /**
+   * 追加湧き（SPAWN周期・上限未満なら、プレイヤーのいる部屋以外の空き床に1体）。
+   */
+  _spawnPhase(run) {
+    run.spawnTick++;
+    if (run.spawnTick < CONFIG.SPAWN_EVERY_TURNS) return;
+    if (run.enemies.length >= CONFIG.ENEMY_CAP) return;
+    run.spawnTick = 0;
+
+    const playerRoom = this.roomAt(run, run.player.x, run.player.y);
+    // プレイヤーのいる部屋以外の部屋の空き床候補
+    const cand = [];
+    for (const r of run.rooms) {
+      if (playerRoom && r === playerRoom) continue;
+      for (let y = r.y; y < r.y + r.h; y++) {
+        for (let x = r.x; x < r.x + r.w; x++) {
+          if (run.map.tiles[y][x] === 0) continue;
+          if (x === run.player.x && y === run.player.y) continue;
+          if (this._enemyAt(run, x, y)) continue;
+          cand.push({ x, y });
+        }
+      }
+    }
+    if (!cand.length) return;
+    // その階の出現テーブルから1種
+    const kinds = Object.keys(DATA.ENEMIES).filter(
+      k => DATA.ENEMIES[k].minF <= run.floor && run.floor <= DATA.ENEMIES[k].maxF
+    );
+    if (!kinds.length) return;
+    const spot = pick(cand);
+    run.enemies.push(this.makeEnemy(pick(kinds), run.floor, spot.x, spot.y));
+  },
+
   /** 20×32 の false 2次元配列（探索済みフラグ用） */
   _blankBool() {
     const a = [];
@@ -1716,6 +2212,76 @@ const Game = {
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
+  },
+
+  /** 眠り自動進行などで一時的に入力を止めるフラグ */
+  _busy: false,
+
+  /**
+   * 入力を受け付けてよいか（画面・進行状態・モーダル・busy を判定）。
+   * @returns {boolean}
+   */
+  canInput() {
+    if (G.screen !== 'game' || !G.run || G.run.over || Game._busy) return false;
+    for (const id of ['menuModal', 'confirmDialog', 'dirOverlay', 'ruleModal']) {
+      const el = document.getElementById(id);
+      if (el && el.classList.contains('open')) return false;
+    }
+    return true;
+  },
+
+  /**
+   * プレイヤーの1行動を解決し、画面へ反映する。
+   * Core.act → events処理（ログ・階段確認・降下）→ 視界更新 → HUD更新 → 終了判定。
+   * @param {object} action - Core.act に渡すアクション
+   * @param {boolean} [internal] - 眠り自動進行など内部呼び出し（ゲートを一部緩める）
+   */
+  playerAction(action, internal) {
+    const run = G.run;
+    if (!run || run.over) return;
+    // 通常入力はゲートを通す。giveup と内部呼び出し（眠り）は通す
+    if (!internal && action.type !== 'giveup' && !Game.canInput()) return;
+
+    const res = Core.act(run, action);
+    for (const ev of res.events) {
+      if (ev.t === 'msg') {
+        Log.add(ev.text);
+      } else if (ev.t === 'stairs') {
+        // 階段に乗った → 降りるか確認（ターンは消費しない）
+        UI.confirm('かいだんを降りますか？', () => Game.playerAction({ type: 'descend' }, true));
+      }
+      // 'descended' は特段の処理不要（ログは act 側で積まれる）
+    }
+
+    Game.updateVision();
+    Hud.update(run);
+    // 独り言の頭上吹き出しは Mono 側がタイマー管理（P6）。ここでは触らない
+
+    if (run.over) { Game.endRun(); return; }
+
+    // 眠り中は敵ターンを自動で進める（入力を止めて連鎖）
+    if (run.player.sleep > 0) {
+      Game._busy = true;
+      setTimeout(() => {
+        Game._busy = false;
+        if (G.run === run && !run.over) Game.playerAction({ type: 'wait' }, true);
+      }, 350);
+    }
+  },
+
+  /**
+   * プレイ終了。結果画面のスコアと暫定メッセージを設定して遷移する。
+   * 詳細な死因表示・送信UIの初期化は P6/P7 が仕上げる。
+   */
+  endRun() {
+    const run = G.run;
+    if (!run) return;
+    document.getElementById('resultScore').textContent = 'B' + run.deepest + 'F';
+    const msg = run.giveup
+      ? '熊は探すのをやめて山へ帰った…'
+      : '熊はFPを見つけられないまま倒れた…';
+    document.getElementById('resultMsg').textContent = msg;
+    UI.showScreen('result');
   },
 };
 
@@ -2089,7 +2655,100 @@ const Hud = (() => {
 })();
 
 // ==== SECTION: INPUT ====
-// P4で実装（ハンドラ配線）
+/**
+ * 操作入力（タッチ8方向パッド＋アクションボタン＋PCキーボード）。
+ * すべて Game.playerAction を介してターンを駆動する。
+ */
+(() => {
+  // ---- 8方向バーチャルパッド（pointerdownで即時1回＋長押し連続移動） ----
+  let repeatTimer = null;
+  let repeatDir   = null;
+
+  /** 連続移動を止める */
+  function stopRepeat() {
+    if (repeatTimer !== null) { clearInterval(repeatTimer); repeatTimer = null; }
+    repeatDir = null;
+  }
+
+  document.querySelectorAll('#dpad .dirBtn').forEach(btn => {
+    const dx = parseInt(btn.dataset.dx, 10);
+    const dy = parseInt(btn.dataset.dy, 10);
+
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (!Game.canInput()) return;
+      // 即時1歩
+      Game.playerAction({ type: 'move', dx, dy });
+      // 長押しで連続移動（REPEAT_MS間隔）
+      stopRepeat();
+      repeatDir = { dx, dy };
+      repeatTimer = setInterval(() => {
+        if (!Game.canInput()) { stopRepeat(); return; }
+        Game.playerAction({ type: 'move', dx: repeatDir.dx, dy: repeatDir.dy });
+      }, CONFIG.REPEAT_MS);
+    });
+
+    // 指/ボタンが離れたら連続移動を解除
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev =>
+      btn.addEventListener(ev, stopRepeat));
+  });
+  // 画面外で指を離した場合の保険
+  document.addEventListener('pointerup', stopRepeat);
+  document.addEventListener('pointercancel', stopRepeat);
+
+  // ---- アクションボタン ----
+  document.getElementById('btnAttack').addEventListener('click', () => {
+    if (!Game.canInput()) return;
+    Game.playerAction({ type: 'attack' });
+  });
+  document.getElementById('btnWait').addEventListener('click', () => {
+    if (!Game.canInput()) return;
+    Game.playerAction({ type: 'wait' });
+  });
+  // メニューボタンは UI-SCREENS で配線済み
+
+  // ---- PCキーボード（矢印＋テンキー8方向, z=攻撃, x=足踏み, m=メニュー） ----
+  // テンキー/方向キー → (dx,dy)
+  const KEY_DIR = {
+    ArrowUp:    [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+    Numpad8: [0, -1], Numpad2: [0, 1], Numpad4: [-1, 0], Numpad6: [1, 0],
+    Numpad7: [-1, -1], Numpad9: [1, -1], Numpad1: [-1, 1], Numpad3: [1, 1],
+  };
+
+  document.addEventListener('keydown', (e) => {
+    // テキスト入力中は無視
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+    // メニューは開いていてもトグルしたいので先に判定
+    if (e.key === 'm' || e.key === 'M') {
+      if (G.screen === 'game' && G.run && !G.run.over) {
+        const menu = document.getElementById('menuModal');
+        if (menu.classList.contains('open')) UI.closeModal('menuModal');
+        else UI.openModal('menuModal');
+        e.preventDefault();
+      }
+      return;
+    }
+
+    if (!Game.canInput()) return;
+
+    if (KEY_DIR[e.code]) {
+      const [dx, dy] = KEY_DIR[e.code];
+      Game.playerAction({ type: 'move', dx, dy });
+      e.preventDefault();
+    } else if (e.code === 'Numpad5') {
+      Game.playerAction({ type: 'wait' });
+      e.preventDefault();
+    } else if (e.key === 'z' || e.key === 'Z') {
+      Game.playerAction({ type: 'attack' });
+      e.preventDefault();
+    } else if (e.key === 'x' || e.key === 'X') {
+      Game.playerAction({ type: 'wait' });
+      e.preventDefault();
+    }
+  });
+})();
 
 // ==== SECTION: MENU ====
 // P5で実装
@@ -2252,7 +2911,7 @@ const UI = (() => {
   document.getElementById('btnGiveup').addEventListener('click', () => {
     confirm('ほんとうにあきらめますか？', () => {
       closeModal('menuModal');
-      // P4でゲーム終了処理を呼ぶ
+      Game.playerAction({ type: 'giveup' });
     });
   });
 
