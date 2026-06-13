@@ -56,7 +56,7 @@ const group = (name, fn, need) => {
   console.log(before === fail ? '  → 合格' : '  → 不合格あり');
 };
 const args = process.argv.slice(2);
-const groups = args.length ? args : ['data', 'mono', 'formulas', 'gen', 'bot'];
+const groups = args.length ? args : ['data', 'mono', 'formulas', 'items', 'gen', 'bot'];
 
 // ---------- data: 定数が仕様書（依頼書v1.1 §8）と一致 ----------
 group('data', () => {
@@ -128,6 +128,100 @@ group('formulas', () => {
   for (let i = 0; i < 1000; i++) seen2.add(Core.calcDamage(1, 9));
   ok(seen2.size === 1 && seen2.has(1), 'calcDamage(1,9)=1（最低保証）');
 }, [typeof Core?.xpNeed === 'function']);
+
+// ---------- items: アイテム効果（§8.4）。use/place/throw ----------
+group('items', () => {
+  // 制御しやすい run を作るヘルパ（B1生成後に player/inv を上書き）
+  const mk = () => {
+    const run = Core.newRun('item');
+    run.player.satiety = 100; run.player.maxSatiety = 100;
+    run.player.hp = 15; run.player.maxHp = 15;
+    run.player.inv = [];
+    run.enemies = []; // 敵フェーズの干渉を排除
+    run.traps = [];
+    return run;
+  };
+  const findUse = (run, kind) => { run.player.inv.push({ kind }); return run.player.inv.length - 1; };
+
+  // 実装検出（未実装なら PENDING）
+  {
+    const r = mk(); r.player.satiety = 20; const i = findUse(r, 'hachimitsu');
+    Core.act(r, { type: 'use', idx: i });
+    if (r.player.satiety === 20 && r.player.inv.length === 1) {
+      console.log('  PENDING: アイテムuse 未実装（P5）'); skip++; return;
+    }
+  }
+
+  // はちみつ +50（上限切り捨て）
+  let r = mk(); r.player.satiety = 20; Core.act(r, { type: 'use', idx: findUse(r, 'hachimitsu') });
+  ok(r.player.satiety === 70 && r.player.inv.length === 0, 'はちみつ 20→70・消費');
+  r = mk(); r.player.satiety = 80; Core.act(r, { type: 'use', idx: findUse(r, 'hachimitsu') });
+  ok(r.player.satiety === 100, 'はちみつ 上限100で切り捨て');
+
+  // おおきな鮭 満腹+100・HP+5
+  r = mk(); r.player.satiety = 10; r.player.hp = 8; Core.act(r, { type: 'use', idx: findUse(r, 'sake') });
+  ok(r.player.satiety === 100 && r.player.hp === 13, '鮭 満腹100・HP+5');
+
+  // 山の木の実 +25（上限maxHp）
+  r = mk(); r.player.hp = 5; r.player.maxHp = 40; Core.act(r, { type: 'use', idx: findUse(r, 'kinomi') });
+  ok(r.player.hp === 30, '木の実 5→30');
+  r = mk(); r.player.hp = 5; Core.act(r, { type: 'use', idx: findUse(r, 'kinomi') });
+  ok(r.player.hp === 15, '木の実 上限maxHpで止まる');
+
+  // ひかる木の実: 通常は全回復／満タンなら最大HP+2して全回復
+  r = mk(); r.player.hp = 6; r.player.maxHp = 30; Core.act(r, { type: 'use', idx: findUse(r, 'hikaru') });
+  ok(r.player.hp === 30 && r.player.maxHp === 30, 'ひかる 全回復');
+  r = mk(); r.player.hp = 15; r.player.maxHp = 15; Core.act(r, { type: 'use', idx: findUse(r, 'hikaru') });
+  ok(r.player.maxHp === 17 && r.player.hp === 17, 'ひかる 満タン時 最大+2');
+
+  // 武器装備: _playerAtk が +atk（基礎3＋武器）。装備中はinvに残る
+  r = mk(); const wi = findUse(r, 'tsume2'); const before = Core._playerAtk(r);
+  Core.act(r, { type: 'use', idx: wi });
+  ok(Core._playerAtk(r) === before + 5 && r.player.inv.length === 1, '岩のツメ装備 atk+5・invに残る');
+  // 付け替え: tsume1→tsume2 で +5 になる
+  r = mk(); Core.act(r, { type: 'use', idx: findUse(r, 'tsume1') });
+  ok(Core._playerAtk(r) === CONFIG.PLAYER_ATK + 2, '木の枝のツメ atk+2');
+  Core.act(r, { type: 'use', idx: findUse(r, 'tsume2') });
+  ok(Core._playerAtk(r) === CONFIG.PLAYER_ATK + 5, '付け替えで atk+5');
+
+  // 盾装備: _playerDef が +def
+  r = mk(); const db = Core._playerDef(r); Core.act(r, { type: 'use', idx: findUse(r, 'kegawa2') });
+  ok(Core._playerDef(r) === db + 5, 'こわい毛皮 def+5');
+
+  // 置く: 足元にアイテムが無ければ置ける・invから消える・run.itemsに増える
+  r = mk();
+  // プレイヤー足元の既存アイテムを除去して条件を揃える
+  r.items = r.items.filter(it => !(it.x === r.player.x && it.y === r.player.y));
+  const pi = findUse(r, 'kinomi'); const itemsBefore = r.items.length;
+  const pr = Core.act(r, { type: 'place', idx: pi });
+  ok(r.items.length === itemsBefore + 1 && r.player.inv.length === 0, '置く: 足元に出現・inv減');
+
+  // 投擲: 直線上の敵に matsubokkuri 10ダメージ・item消費
+  r = mk();
+  r.player.facing = { dx: 1, dy: 0 };
+  // プレイヤーの右方向3マスを床にして敵を置く（部屋内で確保できない場合に備え強制床）
+  const px = r.player.x, py = r.player.y;
+  for (let k = 1; k <= 3; k++) if (r.map.tiles[py] && px + k < CONFIG.MAP_W) r.map.tiles[py][px + k] = 1;
+  r.enemies = [{ x: px + 2, y: py, kind: 'hachi', hp: 20, maxHp: 20, atk: 2, def: 0, exp: 2, stun: 0, cool: 0 }];
+  const ti = findUse(r, 'matsubokkuri');
+  Core.act(r, { type: 'throw', idx: ti, dir: { dx: 1, dy: 0 } });
+  ok(r.enemies.length === 1 && r.enemies[0].hp === 10, '松ぼっくり 直線で10ダメージ');
+  ok(r.player.inv.length === 0, '松ぼっくり 投擲で消費');
+
+  // 投擲: しびれ茸で stun=5
+  r = mk(); r.player.facing = { dx: 1, dy: 0 };
+  for (let k = 1; k <= 3; k++) if (r.map.tiles[r.player.y] && r.player.x + k < CONFIG.MAP_W) r.map.tiles[r.player.y][r.player.x + k] = 1;
+  r.enemies = [{ x: r.player.x + 2, y: r.player.y, kind: 'hachi', hp: 20, maxHp: 20, atk: 2, def: 0, exp: 2, stun: 0, cool: 0 }];
+  Core.act(r, { type: 'throw', idx: findUse(r, 'shibire'), dir: { dx: 1, dy: 0 } });
+  ok(r.enemies[0].stun === 5, 'しびれ茸 stun5');
+
+  // 投擲: 壁方向（敵なし）で例外なく消費される
+  r = mk(); r.player.facing = { dx: 1, dy: 0 };
+  let threw = true;
+  try { Core.act(r, { type: 'throw', idx: findUse(r, 'matsubokkuri'), dir: { dx: 1, dy: 0 } }); }
+  catch (e) { threw = false; ok(false, '壁投擲で例外: ' + e.message); }
+  ok(threw, '壁/空振り投擲で例外なし');
+}, [typeof Core?.act === 'function']);
 
 // ---------- gen: フロア生成の健全性（連結性ほか） ----------
 group('gen', () => {
