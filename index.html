@@ -1264,8 +1264,50 @@ const DATA = Object.freeze({
     otoshiana: { name:'ぐるぐる落とし穴',   emoji:'🌀', warp:true    },
   }),
 
-  // 独り言リスト（§8.2 一字一句変更禁止。P6でメインセッションが厳密注入する）
-  MONOLOGUE_LINES: [],
+  // 独り言リスト（依頼書§8.2 一字一句変更禁止。docs/game-spec.md からバイト一致で転記）
+  MONOLOGUE_LINES: [
+    "あのさぁ...",
+    "前から思ってたんだけど",
+    "この前偶然なんだけど",
+    "さらっと言えるの素敵だと思う",
+    "それはよくないと思うよ",
+    "考えなくても分かることをさぁ",
+    "なんでみんな気にしてないのか",
+    "厳しいこと言うとさ",
+    "ごめん、これだけ言わせて",
+    "...って思うんだよね",
+    "...て話なんだけど",
+    "だけどさ",
+    "...って普通はなるんだけど",
+    "...を買ったんだけどさ",
+    "おれさぁ思うんだけど",
+    "それはダメに決まってるじゃん",
+    "...って話があってさ",
+    "...ってことはさ",
+    "それはさ、それはさぁ",
+    "気にしすぎなんだよ",
+    "成人の主張やります",
+    "いや、いいんだけどさ",
+    "あのさ、あのさ",
+    "いやいや...",
+    "例えばさぁ",
+    "例えばよ？",
+    "...これってどう思う？",
+    "...ってことになるわけじゃん？",
+    "...ってことを今してるんだよ？",
+    "何がやばいってさぁ",
+    "違うんだよ違うんだよ",
+    "この人ほんとにやばいんだなって",
+    "それが面白いんだよ",
+    "それ意味ないじゃん",
+    "全く同じこと思ってて",
+    "あぁ俺はそれちょっと違う",
+    "気にしたことないんだよね",
+    "...っていう話なわけじゃん？",
+    "俺変なこと言ってる？",
+    "いや、それはさ",
+    "みんな間違ってるんだよね",
+  ],
 
   // プレイヤー絵文字
   PLAYER_EMOJI: '🐻',
@@ -2328,6 +2370,27 @@ const Core = {
     for (let y = 0; y < CONFIG.MAP_H; y++) a.push(new Array(CONFIG.MAP_W).fill(false));
     return a;
   },
+
+  /**
+   * 独り言を1つ返す（§8.2）。シャッフルバッグ方式: 全行をシャッフルして順に出し、
+   * 使い切ったら再シャッフル。再シャッフル境界で直前と同じ行が先頭に来たら入れ替えて連続を回避。
+   * @param {{bag:string[], last:string}} st - 状態（変異される）
+   * @returns {string}
+   */
+  monoNext(st) {
+    if (!st.bag || st.bag.length === 0) {
+      st.bag = shuffle(DATA.MONOLOGUE_LINES);
+      // バッグは末尾から pop する。次に出る末尾要素が直前と同じなら先頭と入れ替える
+      if (st.bag.length > 1 && st.bag[st.bag.length - 1] === st.last) {
+        const t = st.bag[st.bag.length - 1];
+        st.bag[st.bag.length - 1] = st.bag[0];
+        st.bag[0] = t;
+      }
+    }
+    const line = st.bag.pop();
+    st.last = line;
+    return line;
+  },
 };
 
 // ==== CORE-END ====
@@ -2355,6 +2418,7 @@ const Game = {
     Log.clear();
     Log.add('ダンジョン B1F にやってきた');
     Hud.update(G.run);
+    Mono.reset();
     Game.startLoop();
   },
 
@@ -2450,17 +2514,44 @@ const Game = {
   },
 
   /**
-   * プレイ終了。結果画面のスコアと暫定メッセージを設定して遷移する。
-   * 詳細な死因表示・送信UIの初期化は P6/P7 が仕上げる。
+   * 死因を結果画面向けの文言にする（decisions.md）。
+   * 敵名→「◯◯にやられた」／とげの床→「とげの床で力尽きた」／飢え→「おなかがすいて倒れた」。
+   * @param {string} cause - run.deathCause
+   * @returns {string}
+   */
+  deathCauseText(cause) {
+    if (cause === 'とげの床') return 'とげの床で力尽きた';
+    if (cause === '飢え') return 'おなかがすいて倒れた';
+    if (cause) return cause + 'にやられた';
+    return '';
+  },
+
+  /**
+   * プレイ終了。結果画面のスコア・メッセージ・シェア文を設定して遷移する。
+   * 送信UI（送信ボタン・状態・ランキング）の初期化は P7 が担当。
    */
   endRun() {
     const run = G.run;
     if (!run) return;
-    document.getElementById('resultScore').textContent = 'B' + run.deepest + 'F';
-    const msg = run.giveup
-      ? '熊は探すのをやめて山へ帰った…'
-      : '熊はFPを見つけられないまま倒れた…';
+    const score = run.deepest;
+    document.getElementById('resultScore').textContent = 'B' + score + 'F';
+
+    let msg;
+    if (run.giveup) {
+      msg = '熊は探すのをやめて山へ帰った…';
+    } else {
+      // 死亡時は死因を併記（§4.4）
+      const cause = Game.deathCauseText(run.deathCause);
+      msg = '熊はFPを見つけられないまま倒れた…' + (cause ? '（' + cause + '）' : '');
+    }
     document.getElementById('resultMsg').textContent = msg;
+
+    // 結果シェア文（スコア入り。§4.4-5。URLはシェア処理側で付与）
+    const shareBtn = document.getElementById('btnShareResult');
+    shareBtn.dataset.shareText = '『熊のFP探し』B' + score + 'Fまで潜った！きみはどこまで行ける？';
+
+    // 独り言の吹き出しを消してから結果画面へ
+    run.bubbleText = '';
     UI.showScreen('result');
   },
 };
@@ -3139,7 +3230,70 @@ const Menu = (() => {
 })();
 
 // ==== SECTION: MONOLOGUE ====
-// P6で実装
+/**
+ * 独り言タイマー（§8.2）。ゲーム画面表示中、20秒に1回・4秒間、頭上吹き出しに表示する。
+ * メニュー表示中・結果画面・ホーム画面ではタイマーを停止（累積は進めない＝リセットしない）。
+ * 出現順は Core.monoNext のシャッフルバッグで直前と同じセリフが連続しないよう制御。
+ */
+const Mono = (() => {
+  const st = { bag: [], last: '' };   // シャッフルバッグ状態
+  let acc = 0;        // 次の独り言までの累積（ms・アクティブ時のみ進む）
+  let showAcc = 0;    // 吹き出し表示の経過（ms）
+  let prevTs = 0;     // 直近 tick のタイムスタンプ
+  let running = false;
+
+  const now = () => (typeof performance !== 'undefined' && performance.now)
+    ? performance.now() : Date.now();
+
+  /** タイマーを進めてよい状態か（ゲーム画面・run有・未終了・モーダル非表示） */
+  function active() {
+    if (G.screen !== 'game' || !G.run || G.run.over) return false;
+    for (const id of ['menuModal', 'confirmDialog', 'dirOverlay', 'ruleModal']) {
+      const el = document.getElementById(id);
+      if (el && el.classList.contains('open')) return false;
+    }
+    return true;
+  }
+
+  function tick() {
+    const t = now();
+    const dt = t - prevTs;
+    prevTs = t;
+    // アクティブ時のみ累積を進める（停止中はdtを捨てる＝累積維持）
+    if (active() && dt >= 0 && dt < 1000) {
+      if (G.run.bubbleText) {
+        // 表示中: 4秒経過で消す
+        showAcc += dt;
+        if (showAcc >= CONFIG.MONO_SHOW_MS) { G.run.bubbleText = ''; showAcc = 0; }
+      } else {
+        // 非表示: 20秒経過で新しい独り言
+        acc += dt;
+        if (acc >= CONFIG.MONO_INTERVAL_MS) {
+          acc = 0;
+          showAcc = 0;
+          G.run.bubbleText = Core.monoNext(st);
+        }
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  /** タイマー開始（boot で1回だけ） */
+  function start() {
+    if (running) return;
+    running = true;
+    prevTs = now();
+    requestAnimationFrame(tick);
+  }
+
+  /** 新規プレイ開始時のリセット（累積と表示をクリア） */
+  function reset() {
+    acc = 0; showAcc = 0; prevTs = now();
+    if (G.run) G.run.bubbleText = '';
+  }
+
+  return { start, reset };
+})();
 
 // ==== SECTION: UI-SCREENS ====
 /**
@@ -3385,6 +3539,9 @@ const UI = (() => {
       setTimeout(() => Render.resize(), 100);
     }
   });
+
+  // 独り言タイマー開始（アクティブ条件は Mono 内で判定）
+  Mono.start();
 })();
 </script>
 </body>
