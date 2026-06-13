@@ -736,6 +736,65 @@ body {
   list-style: none;
   font-size: 14px;
   color: var(--clr-muted);
+  padding: 0;
+  margin: 0;
+}
+
+/* 持ち物リスト行：絵文字＋名前＋ボタン2つ */
+.menu-item-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  border-bottom: 1px solid var(--clr-border);
+  flex-wrap: nowrap;
+  min-height: 52px;
+}
+
+.menu-item-label {
+  flex: 1;
+  font-size: 13px;
+  color: var(--clr-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-item-btn {
+  flex-shrink: 0;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-family: 'Courier New', Courier, monospace;
+  font-weight: bold;
+  color: var(--clr-text);
+  background: var(--clr-btn);
+  border: 2px solid var(--clr-border);
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  letter-spacing: 0.5px;
+}
+
+.menu-item-btn:active {
+  background: var(--clr-btn-act);
+  transform: translate(1px, 1px);
+}
+
+.menu-info-line {
+  font-size: 14px;
+  color: var(--clr-text);
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--clr-border);
+  line-height: 1.6;
+}
+
+.menu-info-label {
+  color: var(--clr-muted);
+  font-size: 12px;
 }
 
 /* 確認ダイアログ */
@@ -1815,11 +1874,129 @@ const Core = {
         }
         return { events, turnSpent: false };
       }
-      case 'use':
-      case 'place':
+      case 'use': {
+        // アイテムを使う（§8.4）
+        const item = p.inv[action.idx];
+        if (!item) return { events, turnSpent: false };
+        const ITEM = DATA.ITEMS[item.kind];
+        const iname = ITEM.name;
+        if (ITEM.cat === 'food') {
+          // 食料: 満腹度回復。鮭はHP回復も
+          p.satiety = Math.min(p.maxSatiety, p.satiety + ITEM.satiety);
+          if (ITEM.hp) {
+            p.hp = Math.min(p.maxHp, p.hp + ITEM.hp);
+          }
+          p.inv.splice(action.idx, 1);
+          msg(iname + 'を食べた');
+          turnSpent = true;
+        } else if (ITEM.cat === 'heal') {
+          if (ITEM.full) {
+            // ひかる木の実: HP満タンなら最大HP+2して新最大まで回復
+            if (p.hp >= p.maxHp) {
+              p.maxHp += ITEM.maxUp;
+              p.hp = p.maxHp;
+              msg('最大HPが上がった！');
+            } else {
+              p.hp = p.maxHp;
+              msg('HPが全回復した');
+            }
+          } else {
+            // 木の実: HP回復（上限maxHp）
+            p.hp = Math.min(p.maxHp, p.hp + ITEM.hp);
+            msg('HPが回復した');
+          }
+          p.inv.splice(action.idx, 1);
+          turnSpent = true;
+        } else if (ITEM.cat === 'weapon') {
+          // 武器装備: invに残したまま player.weapon に参照を設定（同種/別種を問わず単純に置き換え）
+          p.weapon = p.inv[action.idx];
+          msg(iname + 'を装備した');
+          turnSpent = true;
+        } else if (ITEM.cat === 'shield') {
+          // 盾装備: invに残したまま player.shield に参照を設定
+          p.shield = p.inv[action.idx];
+          msg(iname + 'を装備した');
+          turnSpent = true;
+        } else if (ITEM.cat === 'throw') {
+          // 投擲アイテム: Core側ではターン消費せず、DOM側に方向選択を委ねる
+          events.push({ t: 'needDir', idx: action.idx });
+          return { events, turnSpent: false };
+        } else {
+          return { events, turnSpent: false };
+        }
+        break;
+      }
+      case 'place': {
+        // アイテムを足元に置く（§8.4・decisions.md）
+        const itemP = p.inv[action.idx];
+        if (!itemP) return { events, turnSpent: false };
+        // 装備中は置けない
+        if (itemP === p.weapon || itemP === p.shield) {
+          msg('装備中のものは置けない');
+          return { events, turnSpent: false };
+        }
+        // 足元に既にアイテムがあれば置けない
+        const occupied = run.items.some(it => it.x === p.x && it.y === p.y);
+        if (occupied) {
+          msg('ここには置けない');
+          return { events, turnSpent: false };
+        }
+        const inameP = DATA.ITEMS[itemP.kind].name;
+        run.items.push({ x: p.x, y: p.y, kind: itemP.kind });
+        p.inv.splice(action.idx, 1);
+        msg(inameP + 'を置いた');
+        turnSpent = true;
+        break;
+      }
       case 'throw': {
-        // TODO(P5): アイテム使用・設置・投擲を実装する
-        return { events, turnSpent: false };
+        // アイテムを投擲する（§8.4・decisions.md）
+        const itemT = p.inv[action.idx];
+        if (!itemT) return { events, turnSpent: false };
+        const ITEM_T = DATA.ITEMS[itemT.kind];
+        const inameT = ITEM_T.name;
+        // 必ず消費（当たらなくても）
+        p.inv.splice(action.idx, 1);
+        // 投擲方向へ1マスずつ飛ばす
+        const { dx, dy } = action.dir;
+        let cx = p.x + dx, cy = p.y + dy;
+        let hit = false;
+        while (true) {
+          // 盤外または壁 → 消滅して停止
+          if (cx < 0 || cy < 0 || cx >= CONFIG.MAP_W || cy >= CONFIG.MAP_H) break;
+          if (run.map.tiles[cy][cx] === 0) break;
+          // 敵に当たったか確認
+          const target = this._enemyAt(run, cx, cy);
+          if (target) {
+            hit = true;
+            if (ITEM_T.dmg) {
+              // 松ぼっくり: ダメージ（倒せば経験値・ヤマアラシ反撃なし）
+              target.hp -= ITEM_T.dmg;
+              const ename = DATA.ENEMIES[target.kind].name;
+              msg(inameT + 'が ' + ename + ' に当たった！ ' + ITEM_T.dmg + 'ダメージ');
+              if (target.hp <= 0) {
+                msg(ename + 'をたおした');
+                const ti = run.enemies.indexOf(target);
+                if (ti >= 0) run.enemies.splice(ti, 1);
+                for (const m of this._gainXp(run, target.exp)) msg(m);
+              }
+            } else if (ITEM_T.stun) {
+              // しびれ茸: 即座にスタンを付与。直後の敵フェーズで stun が1減り「行動不能」が始まる
+              // （麻痺アイテムは投擲ターンの反撃を許さない＝敵フェーズ前に設定する）。
+              target.stun = ITEM_T.stun;
+              const ename = DATA.ENEMIES[target.kind].name;
+              msg(ename + 'はしびれている！');
+            }
+            break;
+          }
+          cx += dx; cy += dy;
+        }
+        if (!hit) {
+          msg(inameT + 'は飛んでいった');
+        }
+        turnSpent = true;
+        // ターン解決（敵フェーズ）。しびれた敵はこのフェーズから行動できない
+        if (!run.over) this._resolveTurn(run, events);
+        return { events, turnSpent };
       }
       default:
         return { events, turnSpent: false };
@@ -2249,6 +2426,9 @@ const Game = {
       } else if (ev.t === 'stairs') {
         // 階段に乗った → 降りるか確認（ターンは消費しない）
         UI.confirm('かいだんを降りますか？', () => Game.playerAction({ type: 'descend' }, true));
+      } else if (ev.t === 'needDir') {
+        // 投擲アイテム: 方向選択オーバーレイを開く（ターン未消費・アイテム未消費）
+        Menu.openDirOverlay(ev.idx);
       }
       // 'descended' は特段の処理不要（ログは act 側で積まれる）
     }
@@ -2725,7 +2905,7 @@ const Hud = (() => {
       if (G.screen === 'game' && G.run && !G.run.over) {
         const menu = document.getElementById('menuModal');
         if (menu.classList.contains('open')) UI.closeModal('menuModal');
-        else UI.openModal('menuModal');
+        else Menu.open();
         e.preventDefault();
       }
       return;
@@ -2751,7 +2931,212 @@ const Hud = (() => {
 })();
 
 // ==== SECTION: MENU ====
-// P5で実装
+/**
+ * メニューモーダルの表示・描画モジュール（§7.4）。
+ * DOM操作のみ。CORE・Render・Log への依存は持つが、audio/CONFIG変更は禁止。
+ * アイテム名など外部文字列は必ず textContent で描画（innerHTML禁止）。
+ */
+const Menu = (() => {
+  // 投擲待ち idx の保持（DOM側で管理）
+  let _pendingThrowIdx = null;
+
+  /**
+   * メニューを開く。ゲーム中・run有・over でないときのみ有効。
+   */
+  function open() {
+    if (!G.run || G.run.over || G.screen !== 'game') return;
+    render();
+    UI.openModal('menuModal');
+  }
+
+  /**
+   * 3ペインをすべて再描画する（openModal 前に呼ぶ）。
+   * textContent のみ使用（innerHTML禁止）。
+   */
+  function render() {
+    if (!G.run) return;
+    _renderItems();
+    _renderEquip();
+    _renderStatus();
+  }
+
+  /**
+   * 持ち物タブ (#menuItems) を描画する。
+   * 各行: 絵文字＋名前（装備中は [装備中] 付与）＋「使う」「置く」ボタン。
+   */
+  function _renderItems() {
+    const pane = document.getElementById('menuItems');
+    const ul   = pane.querySelector('.menu-list');
+    // 既存行をすべて除去
+    while (ul.firstChild) ul.removeChild(ul.firstChild);
+
+    const p   = G.run.player;
+    const inv = p.inv;
+
+    if (inv.length === 0) {
+      const li = document.createElement('li');
+      li.className = 'menu-item-row';
+      const span = document.createElement('span');
+      span.className = 'menu-item-label';
+      span.textContent = 'なにも持っていない';
+      li.appendChild(span);
+      ul.appendChild(li);
+      return;
+    }
+
+    inv.forEach((item, idx) => {
+      const ITEM   = DATA.ITEMS[item.kind];
+      const isWeap = (item === p.weapon);
+      const isShld = (item === p.shield);
+      const equipped = isWeap || isShld;
+
+      const li = document.createElement('li');
+      li.className = 'menu-item-row';
+
+      // 絵文字＋名前（＋装備中ラベル）
+      const label = document.createElement('span');
+      label.className = 'menu-item-label';
+      label.textContent = ITEM.emoji + ' ' + ITEM.name + (equipped ? ' [装備中]' : '');
+      li.appendChild(label);
+
+      // 「使う」ボタン
+      const btnUse = document.createElement('button');
+      btnUse.className = 'menu-item-btn';
+      btnUse.textContent = '使う';
+      btnUse.dataset.idx = idx;
+      btnUse.addEventListener('click', () => {
+        UI.closeModal('menuModal');
+        // throw カテゴリは needDir フロー経由（Game.playerAction 内で処理）
+        Game.playerAction({ type: 'use', idx });
+      });
+      li.appendChild(btnUse);
+
+      // 「置く」ボタン
+      const btnPlace = document.createElement('button');
+      btnPlace.className = 'menu-item-btn';
+      btnPlace.textContent = '置く';
+      btnPlace.dataset.idx = idx;
+      btnPlace.addEventListener('click', () => {
+        UI.closeModal('menuModal');
+        Game.playerAction({ type: 'place', idx });
+      });
+      li.appendChild(btnPlace);
+
+      ul.appendChild(li);
+    });
+  }
+
+  /**
+   * 装備タブ (#menuEquip) を描画する（読み取り専用）。
+   */
+  function _renderEquip() {
+    const pane = document.getElementById('menuEquip');
+    const ul   = pane.querySelector('.menu-list');
+    while (ul.firstChild) ul.removeChild(ul.firstChild);
+
+    const p = G.run.player;
+
+    // 武器行
+    const liWeap = document.createElement('li');
+    liWeap.className = 'menu-info-line';
+    const lblWeap = document.createElement('span');
+    lblWeap.className = 'menu-info-label';
+    lblWeap.textContent = '武器：';
+    liWeap.appendChild(lblWeap);
+    const valWeap = document.createElement('span');
+    if (p.weapon) {
+      const d = DATA.ITEMS[p.weapon.kind];
+      valWeap.textContent = d.emoji + ' ' + d.name;
+    } else {
+      valWeap.textContent = 'なし';
+    }
+    liWeap.appendChild(valWeap);
+    ul.appendChild(liWeap);
+
+    // 盾行
+    const liShld = document.createElement('li');
+    liShld.className = 'menu-info-line';
+    const lblShld = document.createElement('span');
+    lblShld.className = 'menu-info-label';
+    lblShld.textContent = '盾：';
+    liShld.appendChild(lblShld);
+    const valShld = document.createElement('span');
+    if (p.shield) {
+      const d = DATA.ITEMS[p.shield.kind];
+      valShld.textContent = d.emoji + ' ' + d.name;
+    } else {
+      valShld.textContent = 'なし';
+    }
+    liShld.appendChild(valShld);
+    ul.appendChild(liShld);
+  }
+
+  /**
+   * 状態タブ (#menuStatus) を描画する。
+   * 階・Lv・HP・満腹度・攻撃・防御を表示。
+   */
+  function _renderStatus() {
+    const pane = document.getElementById('menuStatus');
+    const ul   = pane.querySelector('.menu-list');
+    while (ul.firstChild) ul.removeChild(ul.firstChild);
+
+    const run = G.run;
+    const p   = run.player;
+
+    const rows = [
+      ['現在の階',   'B' + run.floor + 'F'],
+      ['レベル',     'Lv ' + p.lv],
+      ['HP',         p.hp + ' / ' + p.maxHp],
+      ['満腹度',     p.satiety + ' / ' + p.maxSatiety],
+      ['攻撃',       '' + Core._playerAtk(run)],
+      ['防御',       '' + Core._playerDef(run)],
+    ];
+
+    for (const [label, value] of rows) {
+      const li = document.createElement('li');
+      li.className = 'menu-info-line';
+      const lblEl = document.createElement('span');
+      lblEl.className = 'menu-info-label';
+      lblEl.textContent = label + '：';
+      li.appendChild(lblEl);
+      const valEl = document.createElement('span');
+      valEl.textContent = value;
+      li.appendChild(valEl);
+      ul.appendChild(li);
+    }
+  }
+
+  /**
+   * 投擲の方向選択オーバーレイを開く。
+   * @param {number} idx - inv のインデックス
+   */
+  function openDirOverlay(idx) {
+    _pendingThrowIdx = idx;
+    document.getElementById('dirOverlay').classList.add('open');
+  }
+
+  // 投擲方向ボタンのイベント
+  document.querySelectorAll('.throwBtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const dx = parseInt(btn.dataset.dx, 10);
+      const dy = parseInt(btn.dataset.dy, 10);
+      document.getElementById('dirOverlay').classList.remove('open');
+      if (_pendingThrowIdx !== null) {
+        const idx = _pendingThrowIdx;
+        _pendingThrowIdx = null;
+        Game.playerAction({ type: 'throw', idx, dir: { dx, dy } });
+      }
+    });
+  });
+
+  // キャンセルで pendingThrowIdx もクリア
+  document.getElementById('btnThrowCancel').addEventListener('click', () => {
+    _pendingThrowIdx = null;
+    // dirOverlay の close は UI-SCREENS の既存ハンドラが処理
+  });
+
+  return { open, render, openDirOverlay };
+})();
 
 // ==== SECTION: MONOLOGUE ====
 // P6で実装
@@ -2899,7 +3284,7 @@ const UI = (() => {
 
   // メニューボタン（ゲーム画面）
   document.getElementById('btnMenu').addEventListener('click', () => {
-    openModal('menuModal');
+    Menu.open();
   });
 
   // メニュー閉じる

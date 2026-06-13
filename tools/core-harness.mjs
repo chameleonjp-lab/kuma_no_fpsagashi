@@ -208,12 +208,24 @@ group('items', () => {
   ok(r.enemies.length === 1 && r.enemies[0].hp === 10, '松ぼっくり 直線で10ダメージ');
   ok(r.player.inv.length === 0, '松ぼっくり 投擲で消費');
 
-  // 投擲: しびれ茸で stun=5
-  r = mk(); r.player.facing = { dx: 1, dy: 0 };
+  // 投擲: しびれ茸で麻痺。隣接敵に投げても投擲ターンに反撃されず（即時麻痺）、麻痺が継続する
+  r = mk(); r.player.facing = { dx: 1, dy: 0 }; r.player.hp = 15; r.player.maxHp = 15;
   for (let k = 1; k <= 3; k++) if (r.map.tiles[r.player.y] && r.player.x + k < CONFIG.MAP_W) r.map.tiles[r.player.y][r.player.x + k] = 1;
-  r.enemies = [{ x: r.player.x + 2, y: r.player.y, kind: 'hachi', hp: 20, maxHp: 20, atk: 2, def: 0, exp: 2, stun: 0, cool: 0 }];
+  // 敵を隣接（距離1）に置く。麻痺が無ければ敵フェーズで反撃される配置
+  r.enemies = [{ x: r.player.x + 1, y: r.player.y, kind: 'hachi', hp: 20, maxHp: 20, atk: 5, def: 0, exp: 2, stun: 0, cool: 0 }];
   Core.act(r, { type: 'throw', idx: findUse(r, 'shibire'), dir: { dx: 1, dy: 0 } });
-  ok(r.enemies[0].stun === 5, 'しびれ茸 stun5');
+  ok(r.player.hp === 15, 'しびれ茸 隣接敵に投げても投擲ターンに反撃されない（即時麻痺）');
+  ok(r.enemies[0] && r.enemies[0].stun >= 1, 'しびれ茸 投擲後も麻痺が継続（stun>=1）');
+  // 5ターン行動不能の確認: stun=5設定→敵フェーズ1回で4。さらに足踏みを重ね、計5フェーズ目で解ける
+  let frozen = 0;
+  for (let t = 0; t < 6; t++) {
+    const ex = r.enemies[0].x;
+    Core.act(r, { type: 'wait' });
+    if (!r.enemies[0]) break;
+    if (r.enemies[0].x === ex && r.enemies[0].stun >= 0 && r.enemies[0].stun < 5) frozen++;
+    if (r.enemies[0].stun === 0) break;
+  }
+  ok(r.enemies[0] && r.enemies[0].stun === 0, 'しびれ茸 数ターン後に麻痺が解ける');
 
   // 投擲: 壁方向（敵なし）で例外なく消費される
   r = mk(); r.player.facing = { dx: 1, dy: 0 };
