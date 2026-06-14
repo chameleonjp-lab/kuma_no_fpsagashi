@@ -417,8 +417,8 @@ body {
 
 /* メッセージログ */
 #msgLog {
-  height: 66px;
-  min-height: 66px;
+  height: 92px;
+  min-height: 92px;
   flex-shrink: 0;
   padding: 4px 8px;
   background: var(--clr-surface);
@@ -427,13 +427,13 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  gap: 1px;
+  gap: 0;
 }
 
 .log-line {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--clr-text);
-  line-height: 1.4;
+  line-height: 1.35;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1242,7 +1242,7 @@ const CONFIG = Object.freeze({
   LVUP_DEF_EVERY:   3,
 
   // ターン経過処理（§8.1, §8.5）
-  REGEN_EVERY_TURNS:  2,
+  REGEN_EVERY_TURNS:  5,
   HUNGER_EVERY_TURNS:10,
   HUNGER_WARN:       30,
 
@@ -1281,8 +1281,19 @@ const DATA = Object.freeze({
     kitsune:    { name:'ずるいキツネ',          emoji:'🦊', hp:6,  atk:3, def:1, exp:4,  minF:1,        maxF:4,        ai:'fox'     },
     karasu:     { name:'いかくカラス',          emoji:'🦅', hp:5,  atk:4, def:0, exp:5,  minF:3,        maxF:6,        ai:'slow'    },
     yamaarashi: { name:'とげとげヤマアラシ',    emoji:'🦔', hp:10, atk:3, def:3, exp:8,  minF:5,        maxF:9,        ai:'counter' },
-    hebi:       { name:'ねむりヘビ',            emoji:'🐍', hp:8,  atk:4, def:1, exp:9,  minF:7,        maxF:Infinity, ai:'sleep'   },
-    inoshishi:  { name:'ぬしのイノシシ',        emoji:'🐗', hp:16, atk:6, def:2, exp:15, minF:10,       maxF:Infinity, ai:'boar'    },
+    hebi:       { name:'ねむりヘビ',            emoji:'🐍', hp:8,  atk:4, def:1, exp:9,  minF:7,        maxF:15,       ai:'sleep'   },
+    inoshishi:  { name:'ぬしのイノシシ',        emoji:'🐗', hp:16, atk:6, def:2, exp:15, minF:10,       maxF:15,       ai:'boar'    },
+    // --- 深層の新規大型獣（v2・依頼者指示）。理論上撃破可能なフラット基準値＋緩やかな床上昇（intro階基準・rate0.06）---
+    suigyu:     { name:'あばれ水牛',     emoji:'🐃', hp:30,  atk:8,  def:4,  exp:20,  minF:12, maxF:14,       ai:'boar',   scaleFrom:12, scaleRate:0.06 },
+    gorilla:    { name:'いわゴリラ',     emoji:'🦍', hp:40,  atk:11, def:6,  exp:30,  minF:15, maxF:17,       ai:'charge', scaleFrom:15, scaleRate:0.06 },
+    tora:       { name:'はやてのトラ',   emoji:'🐅', hp:38,  atk:14, def:5,  exp:40,  minF:18, maxF:21,       ai:'charge', scaleFrom:18, scaleRate:0.06 },
+    sai:        { name:'てつのサイ',     emoji:'🦏', hp:55,  atk:16, def:9,  exp:55,  minF:22, maxF:24,       ai:'boar',   scaleFrom:22, scaleRate:0.06 },
+    kaba:       { name:'のしかかりカバ', emoji:'🦛', hp:70,  atk:18, def:8,  exp:65,  minF:25, maxF:27,       ai:'charge', scaleFrom:25, scaleRate:0.06 },
+    zou:        { name:'おおきなゾウ',   emoji:'🐘', hp:85,  atk:21, def:10, exp:80,  minF:28, maxF:29,       ai:'charge', scaleFrom:28, scaleRate:0.06 },
+    wani:       { name:'かみつきワニ',   emoji:'🐊', hp:75,  atk:24, def:9,  exp:90,  minF:30, maxF:32,       ai:'charge', scaleFrom:30, scaleRate:0.06 },
+    mammoth:    { name:'こだいマンモス', emoji:'🦣', hp:100, atk:27, def:12, exp:105, minF:33, maxF:35,       ai:'boar',   scaleFrom:33, scaleRate:0.06 },
+    herajika:   { name:'まぼろしヘラジカ', emoji:'🫎', hp:95,  atk:30, def:11, exp:120, minF:36, maxF:38,       ai:'charge', scaleFrom:36, scaleRate:0.06 },
+    dragon:     { name:'ぬしのドラゴン', emoji:'🐉', hp:130, atk:34, def:14, exp:150, minF:39, maxF:Infinity, ai:'boar',   scaleFrom:39, scaleRate:0.06 },
   }),
 
   // アイテムデータ（§8.4の表から転記）
@@ -1597,12 +1608,27 @@ const Dungeon = (() => {
       CONFIG.TRAP_CAP
     );
     const trapKinds = Object.keys(DATA.TRAPS);
+    // 通路に隣接する部屋床＝出入り口（チョークポイント）。ぐるぐる落とし穴は回避不能を避けるため
+    // ここに置かない（v2・依頼者指示）。とげ/はらぺこは従来どおり部屋床全体に配置可。
+    const isDoorway = (x, y) => {
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx >= 0 && ny >= 0 && nx < W && ny < H && tiles[ny][nx] === 2) return true;
+      }
+      return false;
+    };
     const traps = [];
     const trapPool = shuffle(allFloors);
     for (const c of trapPool) {
       if (traps.length >= trapCount) break;
       if (used.has(keyOf(c.x, c.y))) continue;
-      traps.push({ x: c.x, y: c.y, kind: pick(trapKinds), revealed: false });
+      let kind = pick(trapKinds);
+      // 落とし穴が出入り口に当たったら、出入り口でない床は別種（とげ/はらぺこ）に振り替える
+      if (DATA.TRAPS[kind].warp && isDoorway(c.x, c.y)) {
+        const safe = trapKinds.filter(k => !DATA.TRAPS[k].warp);
+        kind = pick(safe);
+      }
+      traps.push({ x: c.x, y: c.y, kind, revealed: false });
       used.add(keyOf(c.x, c.y));
     }
 
@@ -1643,14 +1669,20 @@ const Core = {
   },
 
   /**
-   * B16以深の基礎値補正（§5.2）。floorNo<DEEP_FLOOR は素通し。
+   * 深層の基礎値補正。既定は§5.2（基準15階・rate0.1、B16以深で上昇）。
+   * 敵ごとに scaleFrom（基準階）/ scaleRate（係数）を渡すと、その敵専用の上昇曲線になる
+   * （v2の新規大型獣は intro階基準・緩やかなrateで「理論上撃破可能」を保つ）。
    * @param {number} base - 基礎値
    * @param {number} floorNo - 階数
+   * @param {number} [scaleFrom] - 基準階（この階までは素通し）
+   * @param {number} [scaleRate] - 1階あたりの上昇率
    * @returns {number}
    */
-  deepScale(base, floorNo) {
-    if (floorNo < CONFIG.DEEP_FLOOR) return base;
-    return Math.ceil(base * (1 + CONFIG.DEEP_RATE * (floorNo - CONFIG.DEEP_BASE_FLOOR)));
+  deepScale(base, floorNo, scaleFrom, scaleRate) {
+    const sf = (scaleFrom == null) ? CONFIG.DEEP_BASE_FLOOR : scaleFrom; // 既定15
+    const sr = (scaleRate == null) ? CONFIG.DEEP_RATE : scaleRate;       // 既定0.1
+    if (floorNo <= sf) return base;
+    return Math.ceil(base * (1 + sr * (floorNo - sf)));
   },
 
   /**
@@ -1673,14 +1705,15 @@ const Core = {
    */
   makeEnemy(kind, floorNo, x, y) {
     const d = DATA.ENEMIES[kind];
-    const hp = this.deepScale(d.hp, floorNo);
+    const sf = d.scaleFrom, sr = d.scaleRate; // 新規獣は専用曲線・既存はundefined（§5.2既定）
+    const hp = this.deepScale(d.hp, floorNo, sf, sr);
     return {
       x, y, kind,
       hp,
       maxHp: hp,
-      atk: this.deepScale(d.atk, floorNo),
-      def: this.deepScale(d.def, floorNo),
-      exp: this.deepScale(d.exp, floorNo),
+      atk: this.deepScale(d.atk, floorNo, sf, sr),
+      def: this.deepScale(d.def, floorNo, sf, sr),
+      exp: this.deepScale(d.exp, floorNo, sf, sr),
       stun: 0,
       cool: 0,
     };
@@ -1928,6 +1961,7 @@ const Core = {
           msg(ename + 'に ' + dmg + 'ダメージ');
           if (target.hp <= 0) {
             msg(ename + 'をたおした');
+            msg('経験値を ' + target.exp + ' かくとく');
             const idx = run.enemies.indexOf(target);
             if (idx >= 0) run.enemies.splice(idx, 1);
             for (const m of this._gainXp(run, target.exp)) msg(m);
@@ -2061,6 +2095,7 @@ const Core = {
               msg(inameT + 'が ' + ename + ' に当たった！ ' + ITEM_T.dmg + 'ダメージ');
               if (target.hp <= 0) {
                 msg(ename + 'をたおした');
+                msg('経験値を ' + target.exp + ' かくとく');
                 const ti = run.enemies.indexOf(target);
                 if (ti >= 0) run.enemies.splice(ti, 1);
                 for (const m of this._gainXp(run, target.exp)) msg(m);
@@ -2119,9 +2154,9 @@ const Core = {
     if (trap) {
       trap.revealed = true;
       const td = DATA.TRAPS[trap.kind];
-      msg(td.name + 'だ！');
       if (td.dmg) {
         p.hp -= td.dmg;
+        msg(td.name + 'だ！ ' + td.dmg + 'ダメージ');
         if (p.hp <= 0) {
           run.over = true;
           run.deathCause = 'とげの床';
@@ -2129,11 +2164,15 @@ const Core = {
           return;
         }
       } else if (td.satiety) {
+        const before = p.satiety;
         p.satiety = Math.max(0, p.satiety - td.satiety);
+        const lost = before - p.satiety;
+        msg(td.name + 'だ！ 満腹度が ' + lost + ' 減った');
       } else if (td.warp) {
+        msg(td.name + 'だ！');
         const dest = this._randomEmptyFloor(run);
         if (dest) { p.x = dest.x; p.y = dest.y; }
-        msg('飛ばされた！');
+        msg('別の場所に飛ばされた！');
       }
     }
 
@@ -2908,7 +2947,8 @@ const Render = (() => {
  */
 const Log = (() => {
   const msgLog  = document.getElementById('msgLog');
-  /** ログ行バッファ（最大3行） */
+  /** ログ行バッファ（最大5行・熊の攻撃が敵の反撃で押し出されにくいよう増量） */
+  const LOG_MAX = 5;
   const lines   = [];
 
   /**
@@ -2917,7 +2957,7 @@ const Log = (() => {
    */
   function add(text) {
     lines.push(text);
-    if (lines.length > 3) lines.shift();
+    if (lines.length > LOG_MAX) lines.shift();
     render();
   }
 

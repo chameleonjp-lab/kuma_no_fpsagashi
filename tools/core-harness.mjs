@@ -56,22 +56,36 @@ const group = (name, fn, need) => {
   console.log(before === fail ? '  → 合格' : '  → 不合格あり');
 };
 const args = process.argv.slice(2);
-const groups = args.length ? args : ['data', 'mono', 'formulas', 'items', 'gen', 'bot'];
+const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'items', 'gen', 'bot'];
 
 // ---------- data: 定数が仕様書（依頼書v1.1 §8）と一致 ----------
 group('data', () => {
   const E = DATA.ENEMIES;
+  // 元6種（v2でhebi/inoshishiのmaxFを15に変更）
   const exp = {
     hachi: ['ハチのむれ', 4, 2, 0, 2, 1, 3],
     kitsune: ['ずるいキツネ', 6, 3, 1, 4, 1, 4],
     karasu: ['いかくカラス', 5, 4, 0, 5, 3, 6],
     yamaarashi: ['とげとげヤマアラシ', 10, 3, 3, 8, 5, 9],
-    hebi: ['ねむりヘビ', 8, 4, 1, 9, 7, Infinity],
-    inoshishi: ['ぬしのイノシシ', 16, 6, 2, 15, 10, Infinity],
+    hebi: ['ねむりヘビ', 8, 4, 1, 9, 7, 15],
+    inoshishi: ['ぬしのイノシシ', 16, 6, 2, 15, 10, 15],
   };
   for (const [k, [name, hp, atk, def, xp, minF, maxF]] of Object.entries(exp)) {
     ok(E[k] && E[k].name === name && E[k].hp === hp && E[k].atk === atk && E[k].def === def
       && E[k].exp === xp && E[k].minF === minF && E[k].maxF === maxF, `敵 ${k} の数値`);
+  }
+  // v2新規深層獣10種（intro階・絵文字・基準値）
+  const beasts = {
+    suigyu: ['🐃', 12], gorilla: ['🦍', 15], tora: ['🐅', 18], sai: ['🦏', 22], kaba: ['🦛', 25],
+    zou: ['🐘', 28], wani: ['🐊', 30], mammoth: ['🦣', 33], herajika: ['🫎', 36], dragon: ['🐉', 39],
+  };
+  for (const [k, [emoji, minF]] of Object.entries(beasts)) {
+    ok(E[k] && E[k].emoji === emoji && E[k].minF === minF && E[k].scaleFrom === minF, `新規獣 ${k}（${emoji} B${minF}）`);
+  }
+  // 出現帯に切れ目がない（B1〜B60 のどの階にも出現可能な敵が1種以上ある）
+  for (let f = 1; f <= 60; f++) {
+    const kinds = Object.keys(E).filter(k => E[k].minF <= f && f <= E[k].maxF);
+    ok(kinds.length >= 1, `B${f} に出現可能な敵がいる`);
   }
   const I = DATA.ITEMS;
   ok(I.hachimitsu.satiety === 50, 'はちみつ 満腹50');
@@ -128,6 +142,47 @@ group('formulas', () => {
   for (let i = 0; i < 1000; i++) seen2.add(Core.calcDamage(1, 9));
   ok(seen2.size === 1 && seen2.has(1), 'calcDamage(1,9)=1（最低保証）');
 }, [typeof Core?.xpNeed === 'function']);
+
+// ---------- beatable: 新規深層獣が「理論上撃破可能」か（v2） ----------
+group('beatable', () => {
+  // 階相応のプレイヤー像（Lv≈階・相応装備）を模した攻撃/防御/HPを推定
+  const player = (floor) => {
+    const lv = Math.min(CONFIG.LV_MAX, Math.max(1, floor)); // Lv≒階（最大30）
+    const atkBase = CONFIG.PLAYER_ATK + (lv - 1);
+    const defBase = CONFIG.PLAYER_DEF + Math.floor(lv / CONFIG.LVUP_DEF_EVERY);
+    const maxHp = CONFIG.PLAYER_HP + (lv - 1) * CONFIG.LVUP_HP;
+    // 装備：その階で入手可能な最良の武器/盾
+    const wpn = floor >= 8 ? 9 : floor >= 4 ? 5 : 2;   // 月/岩/木の枝のツメ
+    const shd = floor >= 8 ? 8 : floor >= 4 ? 5 : 2;   // ぬし/こわい/ふかふか毛皮
+    return { atk: atkBase + wpn, def: defBase + shd, maxHp };
+  };
+  const beasts = ['suigyu', 'gorilla', 'tora', 'sai', 'kaba', 'zou', 'wani', 'mammoth', 'herajika', 'dragon'];
+  for (const kind of beasts) {
+    const d = DATA.ENEMIES[kind];
+    // 共通：有効打が入る・即死しない（intro階＋帯の深部）
+    for (const f of [d.minF, d.minF + 5]) {
+      const e = Core.makeEnemy(kind, f, 0, 0);
+      const P = player(f);
+      const avgDmg = P.atk - e.def;
+      ok(avgDmg >= 2, `${d.name} B${f}: 有効打が入る(player.atk ${P.atk} > enemy.def ${e.def})`);
+      const hits = Math.ceil(e.maxHp / Math.max(1, avgDmg));
+      ok(hits <= 40, `${d.name} B${f}: ${hits}手で撃破可能(<=40)`);
+      const eDmg = Math.max(1, e.atk - P.def);
+      ok(eDmg < P.maxHp * 0.5, `${d.name} B${f}: 一撃 ${eDmg} が即死級でない(player.maxHp ${P.maxHp})`);
+    }
+    // intro階は厳しめ：回復なしのタイマンでも勝てる（被ダメ計 < HP）。
+    // 深部（intro+5）はエンドレス前提のため回復/戦術込みで撃破可能（上の即死しない条件で担保）。
+    {
+      const f = d.minF;
+      const e = Core.makeEnemy(kind, f, 0, 0);
+      const P = player(f);
+      const avgDmg = Math.max(1, P.atk - e.def);
+      const hits = Math.ceil(e.maxHp / avgDmg);
+      const taken = Math.max(1, e.atk - P.def) * hits;
+      ok(taken < P.maxHp, `${d.name} B${f}(intro): 回復なしタイマンで勝てる(被ダメ計 ${taken} < HP ${P.maxHp})`);
+    }
+  }
+}, [typeof Core?.makeEnemy === 'function']);
 
 // ---------- items: アイテム効果（§8.4）。use/place/throw ----------
 group('items', () => {
