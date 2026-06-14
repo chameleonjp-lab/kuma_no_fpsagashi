@@ -845,6 +845,55 @@ body {
   font-size: 12px;
 }
 
+/* 持ち物の所持数見出し（C7） */
+.menu-cap-line {
+  font-size: 12px;
+  color: var(--clr-gold);
+  letter-spacing: 1px;
+  padding: 2px 2px 6px;
+  border-bottom: 1px solid var(--clr-border);
+  margin-bottom: 4px;
+}
+
+/* タップで効果説明を出すアイテム名（C1）。ラベル風の透明ボタン */
+.menu-item-name {
+  flex: 1;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--clr-text);
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+  padding: 6px 2px;
+  min-height: 44px;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu-item-name:active { color: var(--clr-accent); }
+
+/* 効果説明・装備選択肢の案内行 */
+.menu-effect-line {
+  font-size: 12px;
+  color: var(--clr-muted);
+  padding: 2px 2px 4px 8px;
+}
+
+/* 装備選択肢の行（インデント） */
+.menu-choice-row {
+  padding-left: 8px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+/* 無効ボタン（外す不可など） */
+.menu-item-btn.is-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 /* 確認ダイアログ */
 #confirmDialog .modal-body {
   text-align: center;
@@ -1987,6 +2036,17 @@ const Core = {
         turnSpent = true;
         break;
       }
+      case 'unequip': {
+        // 装備を外す（slot: 'weapon'|'shield'）。1ターン消費（§8.4の付け替えに準じる）
+        const slot = action.slot;
+        if (slot !== 'weapon' && slot !== 'shield') return { events, turnSpent: false };
+        if (!p[slot]) return { events, turnSpent: false };
+        const nm = DATA.ITEMS[p[slot].kind].name;
+        p[slot] = null;
+        msg(nm + 'を外した');
+        turnSpent = true;
+        break;
+      }
       case 'descend': {
         // 階段タイル上のときのみ。ターン消費なし（新フロアで敵フェーズを回さない）
         if (p.x === run.stairs.x && p.y === run.stairs.y) {
@@ -2629,6 +2689,10 @@ const Game = {
   endRun() {
     const run = G.run;
     if (!run) return;
+    // 開いていたメニュー/オーバーレイを閉じる（装備など menu内アクションで終了した場合の保険）
+    UI.closeModal('menuModal');
+    UI.closeModal('confirmDialog');
+    document.getElementById('dirOverlay').classList.remove('open');
     const score = run.deepest;
     document.getElementById('resultScore').textContent = 'B' + score + 'F';
 
@@ -3233,12 +3297,55 @@ const Hud = (() => {
 const Menu = (() => {
   // 投擲待ち idx の保持（DOM側で管理）
   let _pendingThrowIdx = null;
+  // 効果説明を開いている持ち物（アイテムオブジェクトのSet・名前タップでトグル）
+  const _effectShown = new Set();
+  // 装備タブで「装備」選択肢を開いている部位（'weapon'|'shield'|null）
+  let _picker = null;
+
+  /**
+   * アイテムの効果説明テキスト（C1）。食料は満腹度の具体値を含む。
+   * @param {string} kind - DATA.ITEMS のキー
+   * @returns {string}
+   */
+  function itemEffectText(kind) {
+    const it = DATA.ITEMS[kind];
+    switch (it.cat) {
+      case 'food':
+        return '満腹度+' + it.satiety + (it.hp ? '・HP+' + it.hp : '');
+      case 'heal':
+        return it.full ? 'HPを全回復（満タンなら最大HP+' + it.maxUp + '）' : 'HP+' + it.hp;
+      case 'throw':
+        return it.dmg ? '投げて当たった敵に' + it.dmg + 'ダメージ'
+                      : '投げて当たった敵を' + it.stun + 'ターンしびれさせる';
+      case 'weapon':
+        return '装備で攻撃+' + it.atk;
+      case 'shield':
+        return '装備で防御+' + it.def;
+      default:
+        return '';
+    }
+  }
+
+  /**
+   * メニューを閉じずにアクションを実行し、メニューを再描画する（C8）。
+   * 装備/外す/装備付け替えで使用。ターンは消費される（敵が1行動する）。
+   * @param {object} action
+   */
+  function actKeepOpen(action) {
+    if (!G.run || G.run.over) return;
+    _picker = null;
+    Game.playerAction(action, true); // internal: メニュー開放中ゲートを通す
+    if (G.run && !G.run.over) render();
+    // 終了した場合は Game.endRun がメニューを閉じる
+  }
 
   /**
    * メニューを開く。ゲーム中・run有・over でないときのみ有効。
    */
   function open() {
     if (!G.run || G.run.over || G.screen !== 'game') return;
+    _effectShown.clear();
+    _picker = null;
     render();
     UI.openModal('menuModal');
   }
@@ -3256,60 +3363,80 @@ const Menu = (() => {
 
   /**
    * 持ち物タブ (#menuItems) を描画する。
-   * 各行: 絵文字＋名前（装備中は [装備中] 付与）＋「使う」「置く」ボタン。
+   * 見出しに所持数 N/上限（C7）。装備中アイテムは一覧から除外し装備タブへ（C3）。
+   * 名前タップで効果説明をトグル（C1）。装備品のボタンは「装備」（C2）。
    */
   function _renderItems() {
     const pane = document.getElementById('menuItems');
     const ul   = pane.querySelector('.menu-list');
-    // 既存行をすべて除去
     while (ul.firstChild) ul.removeChild(ul.firstChild);
 
     const p   = G.run.player;
     const inv = p.inv;
 
-    if (inv.length === 0) {
+    // 見出し: 所持数 N/上限（装備中を含む実所持数）
+    const head = document.createElement('li');
+    head.className = 'menu-cap-line';
+    head.textContent = '持ち物 ' + inv.length + '/' + CONFIG.INV_MAX;
+    ul.appendChild(head);
+
+    // 一覧（装備中＝weapon/shield参照は除外）
+    const rows = inv.map((item, idx) => ({ item, idx }))
+                    .filter(({ item }) => item !== p.weapon && item !== p.shield);
+
+    if (rows.length === 0) {
       const li = document.createElement('li');
       li.className = 'menu-item-row';
       const span = document.createElement('span');
       span.className = 'menu-item-label';
-      span.textContent = 'なにも持っていない';
+      span.textContent = (inv.length === 0) ? 'なにも持っていない' : '（装備品のみ・装備タブを確認）';
       li.appendChild(span);
       ul.appendChild(li);
       return;
     }
 
-    inv.forEach((item, idx) => {
-      const ITEM   = DATA.ITEMS[item.kind];
-      const isWeap = (item === p.weapon);
-      const isShld = (item === p.shield);
-      const equipped = isWeap || isShld;
-
+    for (const { item, idx } of rows) {
+      const ITEM = DATA.ITEMS[item.kind];
       const li = document.createElement('li');
       li.className = 'menu-item-row';
 
-      // 絵文字＋名前（＋装備中ラベル）
-      const label = document.createElement('span');
-      label.className = 'menu-item-label';
-      label.textContent = ITEM.emoji + ' ' + ITEM.name + (equipped ? ' [装備中]' : '');
+      // 絵文字＋名前（タップで効果説明トグル）
+      const label = document.createElement('button');
+      label.className = 'menu-item-label menu-item-name';
+      label.textContent = ITEM.emoji + ' ' + ITEM.name;
+      label.addEventListener('click', () => {
+        if (_effectShown.has(item)) _effectShown.delete(item); else _effectShown.add(item);
+        _renderItems();
+      });
       li.appendChild(label);
 
-      // 「使う」ボタン
-      const btnUse = document.createElement('button');
-      btnUse.className = 'menu-item-btn';
-      btnUse.textContent = '使う';
-      btnUse.dataset.idx = idx;
-      btnUse.addEventListener('click', () => {
-        UI.closeModal('menuModal');
-        // throw カテゴリは needDir フロー経由（Game.playerAction 内で処理）
-        Game.playerAction({ type: 'use', idx });
-      });
-      li.appendChild(btnUse);
+      // カテゴリ別の主ボタン
+      const mainBtn = document.createElement('button');
+      mainBtn.className = 'menu-item-btn';
+      if (ITEM.cat === 'weapon' || ITEM.cat === 'shield') {
+        mainBtn.textContent = '装備';                      // C2
+        mainBtn.addEventListener('click', () => {
+          actKeepOpen({ type: 'use', idx });               // 装備してメニューは閉じない（C8）
+        });
+      } else if (ITEM.cat === 'throw') {
+        mainBtn.textContent = '投げる';
+        mainBtn.addEventListener('click', () => {
+          UI.closeModal('menuModal');
+          Game.playerAction({ type: 'use', idx });         // needDir→方向選択
+        });
+      } else {
+        mainBtn.textContent = '使う';
+        mainBtn.addEventListener('click', () => {
+          UI.closeModal('menuModal');
+          Game.playerAction({ type: 'use', idx });
+        });
+      }
+      li.appendChild(mainBtn);
 
       // 「置く」ボタン
       const btnPlace = document.createElement('button');
       btnPlace.className = 'menu-item-btn';
       btnPlace.textContent = '置く';
-      btnPlace.dataset.idx = idx;
       btnPlace.addEventListener('click', () => {
         UI.closeModal('menuModal');
         Game.playerAction({ type: 'place', idx });
@@ -3317,11 +3444,21 @@ const Menu = (() => {
       li.appendChild(btnPlace);
 
       ul.appendChild(li);
-    });
+
+      // 効果説明（トグル表示）
+      if (_effectShown.has(item)) {
+        const desc = document.createElement('li');
+        desc.className = 'menu-effect-line';
+        desc.textContent = '┗ ' + itemEffectText(item.kind);
+        ul.appendChild(desc);
+      }
+    }
   }
 
   /**
-   * 装備タブ (#menuEquip) を描画する（読み取り専用）。
+   * 装備タブ (#menuEquip) を描画する。
+   * 各部位（武器/盾）の現在装備を表示し、装備/外すボタンを置く（C4/C5）。
+   * 「装備」を押すと持ち物内の装備可能アイテムを選択肢表示・無ければ案内（C6）。
    */
   function _renderEquip() {
     const pane = document.getElementById('menuEquip');
@@ -3329,40 +3466,83 @@ const Menu = (() => {
     while (ul.firstChild) ul.removeChild(ul.firstChild);
 
     const p = G.run.player;
+    const slots = [
+      { slot: 'weapon', label: '武器', cat: 'weapon' },
+      { slot: 'shield', label: '盾',   cat: 'shield' },
+    ];
 
-    // 武器行
-    const liWeap = document.createElement('li');
-    liWeap.className = 'menu-info-line';
-    const lblWeap = document.createElement('span');
-    lblWeap.className = 'menu-info-label';
-    lblWeap.textContent = '武器：';
-    liWeap.appendChild(lblWeap);
-    const valWeap = document.createElement('span');
-    if (p.weapon) {
-      const d = DATA.ITEMS[p.weapon.kind];
-      valWeap.textContent = d.emoji + ' ' + d.name;
-    } else {
-      valWeap.textContent = 'なし';
-    }
-    liWeap.appendChild(valWeap);
-    ul.appendChild(liWeap);
+    for (const s of slots) {
+      const equipped = p[s.slot];
+      // 部位の見出し行（現在の装備＋ボタン）
+      const row = document.createElement('li');
+      row.className = 'menu-item-row';
 
-    // 盾行
-    const liShld = document.createElement('li');
-    liShld.className = 'menu-info-line';
-    const lblShld = document.createElement('span');
-    lblShld.className = 'menu-info-label';
-    lblShld.textContent = '盾：';
-    liShld.appendChild(lblShld);
-    const valShld = document.createElement('span');
-    if (p.shield) {
-      const d = DATA.ITEMS[p.shield.kind];
-      valShld.textContent = d.emoji + ' ' + d.name;
-    } else {
-      valShld.textContent = 'なし';
+      const lbl = document.createElement('span');
+      lbl.className = 'menu-item-label';
+      if (equipped) {
+        const d = DATA.ITEMS[equipped.kind];
+        const val = s.cat === 'weapon' ? '攻+' + d.atk : '防+' + d.def;
+        lbl.textContent = s.label + '：' + d.emoji + ' ' + d.name + '（' + val + '）';
+      } else {
+        lbl.textContent = s.label + '：なし';
+      }
+      row.appendChild(lbl);
+
+      // 「装備」ボタン（選択肢トグル）
+      const btnEquip = document.createElement('button');
+      btnEquip.className = 'menu-item-btn';
+      btnEquip.textContent = '装備';
+      btnEquip.addEventListener('click', () => {
+        _picker = (_picker === s.slot) ? null : s.slot;
+        _renderEquip();
+      });
+      row.appendChild(btnEquip);
+
+      // 「外す」ボタン（装備時のみ有効）
+      const btnOff = document.createElement('button');
+      btnOff.className = 'menu-item-btn';
+      btnOff.textContent = '外す';
+      if (!equipped) { btnOff.disabled = true; btnOff.classList.add('is-disabled'); }
+      btnOff.addEventListener('click', () => {
+        if (!p[s.slot]) return;
+        actKeepOpen({ type: 'unequip', slot: s.slot });
+      });
+      row.appendChild(btnOff);
+
+      ul.appendChild(row);
+
+      // 装備選択肢（picker が開いている部位のみ）
+      if (_picker === s.slot) {
+        const choices = p.inv
+          .map((item, idx) => ({ item, idx }))
+          .filter(({ item }) => DATA.ITEMS[item.kind].cat === s.cat && item !== p[s.slot]);
+        if (choices.length === 0) {
+          const none = document.createElement('li');
+          none.className = 'menu-effect-line';
+          none.textContent = '┗ 装備できる持ち物がない';
+          ul.appendChild(none);
+        } else {
+          for (const { item, idx } of choices) {
+            const d = DATA.ITEMS[item.kind];
+            const ch = document.createElement('li');
+            ch.className = 'menu-item-row menu-choice-row';
+            const chLbl = document.createElement('span');
+            chLbl.className = 'menu-item-label';
+            const val = s.cat === 'weapon' ? '攻+' + d.atk : '防+' + d.def;
+            chLbl.textContent = '┗ ' + d.emoji + ' ' + d.name + '（' + val + '）';
+            ch.appendChild(chLbl);
+            const chBtn = document.createElement('button');
+            chBtn.className = 'menu-item-btn';
+            chBtn.textContent = 'これを装備';
+            chBtn.addEventListener('click', () => {
+              actKeepOpen({ type: 'use', idx }); // 装備（付け替え）してメニュー維持
+            });
+            ch.appendChild(chBtn);
+            ul.appendChild(ch);
+          }
+        }
+      }
     }
-    liShld.appendChild(valShld);
-    ul.appendChild(liShld);
   }
 
   /**
