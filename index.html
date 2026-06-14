@@ -1381,6 +1381,13 @@ const DATA = Object.freeze({
     kegawa12:    { name:'まおうの毛皮',        cat:'shield', emoji:'👹', def:25, minF:31, maxF:41            },
     kegawa13:    { name:'でんせつの毛皮',      cat:'shield', emoji:'🧱', def:28, minF:35                     },
     kegawa14:    { name:'ほしの毛皮',          cat:'shield', emoji:'💠', def:32, minF:40                     },
+    // --- 効果違い装備（同帯の素装備より基礎値を下げて「火力 or 効果」のトレードを作る・F1）---
+    tsumeNemuri: { name:'ねむり花のツメ',  cat:'weapon', emoji:'🌸', atk:8,  minF:9,  maxF:18,
+                   effects:[ { on:'onHit', do:'status', status:'stun', dur:2, chance:0.18 } ] },
+    tsumeOgre:   { name:'こぐまの大剣',    cat:'weapon', emoji:'🪓', atk:28, minF:26, maxF:40,
+                   effects:[ { on:'onAttackCost', do:'satiety', power:-2 } ] },
+    kegawaToge:  { name:'とげ毛皮',        cat:'shield', emoji:'🌵', def:4,  minF:6,  maxF:16,
+                   effects:[ { on:'onAttacked', do:'counter', power:2 } ] },
   }),
 
   // 罠データ（§8.6の表から転記）
@@ -2023,6 +2030,24 @@ const Core = {
   },
 
   /**
+   * 装備（武器/盾）が持つ指定フック(on)の効果を集める（特殊効果装備の共通機構・F1）。
+   * 効果はキー名 if 分岐ではなく effects[] のフックで適用するため、装備を増やしてもCOREは増えない。
+   * @param {object} run
+   * @param {string} hook - 'onHit'|'onAttacked'|'onAttackCost' など
+   * @returns {Array} 効果オブジェクトの配列
+   */
+  _gearEffects(run, hook) {
+    const out = [];
+    for (const slot of ['weapon', 'shield']) {
+      const it = run.player[slot];
+      if (!it) continue;
+      const d = DATA.ITEMS[it.kind];
+      if (d.effects) for (const ef of d.effects) if (ef.on === hook) out.push(ef);
+    }
+    return out;
+  },
+
+  /**
    * ターンを1つ解決する。
    * @param {object} run
    * @param {object} action - {type:'move',dx,dy}|{type:'attack'}|{type:'wait'}
@@ -2086,19 +2111,33 @@ const Core = {
             const idx = run.enemies.indexOf(target);
             if (idx >= 0) run.enemies.splice(idx, 1);
             for (const m of this._gainXp(run, target.exp)) msg(m);
-          } else if (DATA.ENEMIES[target.kind].ai === 'counter') {
+          } else {
+            // 武器の命中時効果（眠り付与など。生存している敵に適用・F1）
+            for (const ef of this._gearEffects(run, 'onHit')) {
+              if (ef.chance != null && Math.random() >= ef.chance) continue;
+              if (ef.do === 'status' && ef.status === 'stun') {
+                target.stun = Math.max(target.stun, ef.dur);
+                msg(ename + 'はねむってしまった！');
+              }
+            }
             // ヤマアラシは生存時のみ固定1反撃
-            p.hp -= 1;
-            msg('とげが刺さった！');
-            if (p.hp <= 0) {
-              run.over = true;
-              run.deathCause = 'とげとげヤマアラシ';
-              msg('熊はたおれた…');
-              return { events, turnSpent: true };
+            if (DATA.ENEMIES[target.kind].ai === 'counter') {
+              p.hp -= 1;
+              msg('とげが刺さった！');
+              if (p.hp <= 0) {
+                run.over = true;
+                run.deathCause = 'とげとげヤマアラシ';
+                msg('熊はたおれた…');
+                return { events, turnSpent: true };
+              }
             }
           }
         } else {
           msg('熊は空振りした');
+        }
+        // 武器の攻撃コスト（高威力武器の満腹度消費など・F1）
+        for (const ef of this._gearEffects(run, 'onAttackCost')) {
+          if (ef.do === 'satiety') p.satiety = Math.max(0, p.satiety + ef.power);
         }
         break;
       }
@@ -2429,6 +2468,21 @@ const Core = {
     if (def.ai === 'sleep' && Math.random() < CONFIG.SLEEP_CHANCE) {
       p.sleep = CONFIG.SLEEP_TURNS;
       msg('熊はねむってしまった！');
+    }
+    // 盾の被弾時効果（反撃など・F1）。反撃で敵を倒したら経験値も入る
+    for (const ef of this._gearEffects(run, 'onAttacked')) {
+      if (ef.chance != null && Math.random() >= ef.chance) continue;
+      if (ef.do === 'counter') {
+        e.hp -= ef.power;
+        msg('毛皮のトゲが ' + def.name + ' を刺した！');
+        if (e.hp <= 0) {
+          msg(def.name + 'をたおした');
+          msg('経験値を ' + e.exp + ' かくとく');
+          const idx = run.enemies.indexOf(e);
+          if (idx >= 0) run.enemies.splice(idx, 1);
+          for (const m of this._gainXp(run, e.exp)) msg(m);
+        }
+      }
     }
   },
 

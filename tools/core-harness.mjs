@@ -56,7 +56,7 @@ const group = (name, fn, need) => {
   console.log(before === fail ? '  → 合格' : '  → 不合格あり');
 };
 const args = process.argv.slice(2);
-const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'gear', 'items', 'gen', 'bot'];
+const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'gear', 'gearfx', 'items', 'gen', 'bot'];
 
 // ---------- data: 定数が仕様書（依頼書v1.1 §8）と一致 ----------
 group('data', () => {
@@ -210,13 +210,14 @@ group('beatable', () => {
 // ---------- gear: 装備の多段階化と出現階バンド（v2.2「深い階ほど強い装備」） ----------
 group('gear', () => {
   const I = DATA.ITEMS;
-  const weapons = Object.keys(I).filter(k => I[k].cat === 'weapon').sort((a, b) => I[a].atk - I[b].atk);
-  const shields = Object.keys(I).filter(k => I[k].cat === 'shield').sort((a, b) => I[a].def - I[b].def);
-  ok(weapons.length >= 7, `武器は7段階以上（実際 ${weapons.length}）`);
-  ok(shields.length >= 7, `盾は7段階以上（実際 ${shields.length}）`);
-  // 強い装備ほど出現階の下限が深い（弱い→強いで minF が単調非減少）
-  for (let i = 1; i < weapons.length; i++) ok((I[weapons[i]].minF ?? 1) >= (I[weapons[i-1]].minF ?? 1), `武器 ${I[weapons[i]].name} の出現階が前段以上`);
-  for (let i = 1; i < shields.length; i++) ok((I[shields[i]].minF ?? 1) >= (I[shields[i-1]].minF ?? 1), `盾 ${I[shields[i]].name} の出現階が前段以上`);
+  // 素の段階ラダー（効果違い装備=effects持ちは火力と効果をトレードするので単調性の対象外）
+  const pureW = Object.keys(I).filter(k => I[k].cat === 'weapon' && !I[k].effects).sort((a, b) => I[a].atk - I[b].atk);
+  const pureS = Object.keys(I).filter(k => I[k].cat === 'shield' && !I[k].effects).sort((a, b) => I[a].def - I[b].def);
+  ok(pureW.length >= 7, `武器は7段階以上（実際 ${pureW.length}）`);
+  ok(pureS.length >= 7, `盾は7段階以上（実際 ${pureS.length}）`);
+  // 強い素装備ほど出現階の下限が深い（弱い→強いで minF が単調非減少）
+  for (let i = 1; i < pureW.length; i++) ok((I[pureW[i]].minF ?? 1) >= (I[pureW[i-1]].minF ?? 1), `武器 ${I[pureW[i]].name} の出現階が前段以上`);
+  for (let i = 1; i < pureS.length; i++) ok((I[pureS[i]].minF ?? 1) >= (I[pureS[i-1]].minF ?? 1), `盾 ${I[pureS[i]].name} の出現階が前段以上`);
   // その階で入手可能な最良装備が、深いほど強い（B1 < B12 < B25 < B39）
   const bestAt = (f, cat, stat) => Object.keys(I).filter(k => I[k].cat === cat && (I[k].minF ?? 1) <= f && f <= (I[k].maxF ?? Infinity))
     .reduce((m, k) => Math.max(m, I[k][stat] || 0), 0);
@@ -229,6 +230,59 @@ group('gear', () => {
   ok(eligible(30, 'weapon').every(k => I[k].atk >= 13), 'B30の武器はすべて atk>=13（弱装備が落ちない）');
   ok(eligible(30, 'shield').every(k => I[k].def >= 12), 'B30の盾はすべて def>=12');
 });
+
+// ---------- gearfx: 特殊効果つき装備（命中時/被弾時フック・F1） ----------
+group('gearfx', () => {
+  // 平坦マップ＋隣接敵1体の局面を作る
+  const setup = (wkind, skind) => {
+    const r = Core.newRun('fx');
+    const W = CONFIG.MAP_W, H = CONFIG.MAP_H, t = [];
+    for (let y = 0; y < H; y++) { const row = []; for (let x = 0; x < W; x++) row.push((x===0||y===0||x===W-1||y===H-1)?0:1); t.push(row); }
+    r.map.tiles = t; r.rooms = [{x:1,y:1,w:W-2,h:H-2}]; r.items=[]; r.traps=[];
+    r.player.x = 10; r.player.y = 10; r.player.hp = 200; r.player.maxHp = 200; r.player.satiety = 100;
+    r.player.inv = []; r.player.weapon = null; r.player.shield = null;
+    if (wkind) { r.player.inv.push({kind:wkind}); r.player.weapon = r.player.inv[r.player.inv.length-1]; }
+    if (skind) { r.player.inv.push({kind:skind}); r.player.shield = r.player.inv[r.player.inv.length-1]; }
+    return r;
+  };
+  // ねむり花のツメ: 命中で確率stun。多数試行で発生するが常時ではない
+  {
+    let slept = 0, trials = 400;
+    for (let i = 0; i < trials; i++) {
+      const r = setup('tsumeNemuri', null);
+      r.player.facing = {dx:1,dy:0};
+      r.enemies = [{x:11,y:10,kind:'hachi',hp:999,maxHp:999,atk:0,def:0,exp:2,stun:0,cool:0}];
+      Core.act(r, {type:'attack'});
+      if (r.enemies[0] && r.enemies[0].stun > 0) slept++;
+    }
+    const rate = slept/trials;
+    ok(rate > 0.08 && rate < 0.32, `ねむり花のツメ 命中stun率~18% (実測 ${(rate*100).toFixed(0)}%)`);
+  }
+  // とげ毛皮: 被弾で反撃（敵HPが減る）。反撃で倒すと敵が消える
+  {
+    const r = setup(null, 'kegawaToge');
+    r.player.hp = 200;
+    r.enemies = [{x:11,y:10,kind:'hachi',hp:10,maxHp:10,atk:3,def:0,exp:2,stun:0,cool:0}];
+    const before = r.enemies[0].hp;
+    Core.act(r, {type:'wait'}); // 敵が隣接攻撃→反撃
+    ok(!r.enemies[0] || r.enemies[0].hp < before, 'とげ毛皮 被弾で反撃ダメージ');
+  }
+  // こぐまの大剣: 攻撃のたび満腹度-2（追加コスト）
+  {
+    const r = setup('tsumeOgre', null);
+    r.player.facing = {dx:1,dy:0}; r.player.satiety = 100; r.enemies = [];
+    Core.act(r, {type:'attack'}); // 空振りでもコストはかかる
+    ok(r.player.satiety <= 98, `こぐまの大剣 攻撃で満腹コスト (満腹 ${r.player.satiety})`);
+  }
+  // 効果なし装備は従来どおり（フックで余計な事が起きない）
+  {
+    const r = setup('tsume5', 'kegawa5');
+    r.player.facing = {dx:1,dy:0}; const s0 = r.player.satiety;
+    r.enemies = [{x:11,y:10,kind:'hachi',hp:999,maxHp:999,atk:0,def:0,exp:2,stun:0,cool:0}];
+    Core.act(r, {type:'attack'});
+    ok(r.player.satiety === s0 && r.enemies[0].stun === 0, '効果なし装備はフック無反応（回帰なし）');
+  }
+}, [typeof Core?._gearEffects === 'function']);
 
 // ---------- items: アイテム効果（§8.4）。use/place/throw ----------
 group('items', () => {
