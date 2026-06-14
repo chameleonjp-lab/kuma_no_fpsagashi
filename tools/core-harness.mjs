@@ -97,8 +97,14 @@ group('data', () => {
   ok(I.tsume1.atk === 2 && I.tsume2.atk === 5 && I.tsume3.atk === 9 && I.tsume3.minF === 8, 'ツメ3種');
   ok(I.kegawa1.def === 2 && I.kegawa2.def === 5 && I.kegawa3.def === 8 && I.kegawa3.minF === 8, '毛皮3種');
   ok(DATA.TRAPS.toge.dmg === 5 && DATA.TRAPS.kafun.satiety === 20 && DATA.TRAPS.otoshiana.warp === true, '罠3種');
-  ok(CONFIG.PLAYER_HP === 15 && CONFIG.PLAYER_ATK === 3 && CONFIG.PLAYER_DEF === 1
+  // 主人公初期値（v2.1でPLAYER_HP 15→20・回復5歩のリバランス）
+  ok(CONFIG.PLAYER_HP === 20 && CONFIG.PLAYER_ATK === 3 && CONFIG.PLAYER_DEF === 1
     && CONFIG.PLAYER_SATIETY === 100 && CONFIG.INV_MAX === 10 && CONFIG.LV_MAX === 30, '主人公初期値');
+  ok(CONFIG.REGEN_EVERY_TURNS === 5, 'HP自然回復は5歩に1回');
+  // フロア毎の敵数・湧き・上限が階で増える（B1-4は楽・深いほど圧）
+  ok(typeof Core.enemyInitCount === 'function' && typeof Core.spawnInterval === 'function' && typeof Core.enemyCap === 'function', '階スケールAPIあり');
+  ok(Core.spawnInterval(2) > Core.spawnInterval(30), '深いほど湧き間隔が短い');
+  ok(Core.enemyCap(2) < Core.enemyCap(30), '深いほど敵上限が多い');
 });
 
 // ---------- mono: 独り言41行のバイト一致＋連続重複なし ----------
@@ -129,7 +135,9 @@ group('mono', () => {
 
 // ---------- formulas: 経験値・深層補正・ダメージ式 ----------
 group('formulas', () => {
-  for (let n = 1; n <= 29; n++) ok(Core.xpNeed(n) === Math.ceil(10 * Math.pow(1.4, n - 1)), `xpNeed(${n})`);
+  // 経験値式は CONFIG の係数に追従（v2.1で 10*1.4^ → 6*1.20^ にリバランス）
+  for (let n = 1; n <= 29; n++) ok(Core.xpNeed(n) === Math.ceil(CONFIG.XP_BASE * Math.pow(CONFIG.XP_MULT, n - 1)), `xpNeed(${n})`);
+  ok(CONFIG.XP_MULT < 1.4, '経験値倍率を緩めた（過度な低レベル詰みの回避）');
   ok(Core.deepScale(8, 15) === 8 && Core.deepScale(8, 1) === 8, 'B15以前は補正なし');
   ok(Core.deepScale(8, 16) === Math.ceil(8 * 1.1), 'B16 ×1.1');
   ok(Core.deepScale(16, 20) === Math.ceil(16 * 1.5), 'B20 ×1.5');
@@ -145,16 +153,17 @@ group('formulas', () => {
 
 // ---------- beatable: 新規深層獣が「理論上撃破可能」か（v2） ----------
 group('beatable', () => {
-  // 階相応のプレイヤー像（Lv≈階・相応装備）を模した攻撃/防御/HPを推定
+  // その階に「実際に到達したプレイヤー」の現実的な強さ（balance-simの到達レベルに整合）。
+  // Lv≒6+0.45*F（最大30）。Lv=Fは過度に楽観的なので、到達相応の控えめなレベルで検証する。
   const player = (floor) => {
-    const lv = Math.min(CONFIG.LV_MAX, Math.max(1, floor)); // Lv≒階（最大30）
+    const lv = Math.min(CONFIG.LV_MAX, Math.max(1, Math.round(6 + floor * 0.45)));
     const atkBase = CONFIG.PLAYER_ATK + (lv - 1);
     const defBase = CONFIG.PLAYER_DEF + Math.floor(lv / CONFIG.LVUP_DEF_EVERY);
     const maxHp = CONFIG.PLAYER_HP + (lv - 1) * CONFIG.LVUP_HP;
     // 装備：その階で入手可能な最良の武器/盾
     const wpn = floor >= 8 ? 9 : floor >= 4 ? 5 : 2;   // 月/岩/木の枝のツメ
     const shd = floor >= 8 ? 8 : floor >= 4 ? 5 : 2;   // ぬし/こわい/ふかふか毛皮
-    return { atk: atkBase + wpn, def: defBase + shd, maxHp };
+    return { atk: atkBase + wpn, def: defBase + shd, maxHp, lv };
   };
   const beasts = ['suigyu', 'gorilla', 'tora', 'sai', 'kaba', 'zou', 'wani', 'mammoth', 'herajika', 'dragon'];
   for (const kind of beasts) {
@@ -328,12 +337,17 @@ group('gen', () => {
     const sr = rooms.findIndex(r => inRoom(stairs, r)), pr = rooms.findIndex(r => inRoom(start, r));
     if (sr === -1 || pr === -1 || sr === pr) { ok(false, `階段/初期位置の部屋分離違反 (floor${f} #${i})`); break; }
     // 配置数
-    if (!(items.length >= 2 && items.length <= 4)) { ok(false, `アイテム数 ${items.length}`); break; }
+    // アイテム数は B10+ で 3-5、それ未満は 2-4（深層の資源を増やす）
+    const iLo = f >= 10 ? 3 : 2, iHi = f >= 10 ? 5 : 4;
+    if (!(items.length >= iLo && items.length <= iHi)) { ok(false, `アイテム数 ${items.length}（floor${f} 期待${iLo}..${iHi}）`); break; }
     const bonus = Math.floor((f - 1) / CONFIG.TRAP_PER_FLOORS);
     const tmin = Math.min(CONFIG.TRAP_MIN + bonus, CONFIG.TRAP_CAP);
     const tmax = Math.min(CONFIG.TRAP_MAX + bonus, CONFIG.TRAP_CAP);
     if (!(traps.length >= tmin && traps.length <= tmax)) { ok(false, `罠数 ${traps.length}（floor${f} 期待${tmin}..${tmax}）`); break; }
-    if (!(enemies.length >= 3 && enemies.length <= 5)) { ok(false, `敵数 ${enemies.length}`); break; }
+    // 敵数は階スケール（B1-2:2 / B3-4:2-3 / B5-9:3-5 / B10-18:4-6 / B19-28:5-7 / B29+:6-8）
+    const eLo = f<=2?2 : f<=4?2 : f<=9?3 : f<=18?4 : f<=28?5 : 6;
+    const eHi = f<=2?2 : f<=4?3 : f<=9?5 : f<=18?6 : f<=28?7 : 8;
+    if (!(enemies.length >= eLo && enemies.length <= eHi)) { ok(false, `敵数 ${enemies.length}（floor${f} 期待${eLo}..${eHi}）`); break; }
     // 出現階テーブル・深層はヘビ/イノシシのみ
     for (const e of enemies) {
       const def = DATA.ENEMIES[e.kind];

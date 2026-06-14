@@ -1269,14 +1269,10 @@ const CONFIG = Object.freeze({
   TRAP_PER_FLOORS:  6,
   TRAP_CAP:         8,
 
-  // 敵湧き（§6.1）
-  ENEMY_INIT_MIN:   3,
-  ENEMY_INIT_MAX:   5,
-  SPAWN_EVERY_TURNS:20,
-  ENEMY_CAP:       10,
+  // 敵の数・湧き・上限は階で増やす（v2.1）。値は Core.enemyInitCount / spawnInterval / enemyCap に集約
 
-  // プレイヤー初期値（§8.1）
-  PLAYER_HP:       15,
+  // プレイヤー初期値（§8.1・v2.1で PLAYER_HP 15→20）
+  PLAYER_HP:       20,
   PLAYER_ATK:       3,
   PLAYER_DEF:       1,
   PLAYER_SATIETY: 100,
@@ -1284,9 +1280,9 @@ const CONFIG = Object.freeze({
   LV_MAX:          30,
 
   // 経験値・レベルアップ（§8.1）
-  XP_BASE:         10,
-  XP_MULT:        1.4,
-  LVUP_HP:          5,
+  XP_BASE:          6,
+  XP_MULT:       1.20,
+  LVUP_HP:          6,
   LVUP_ATK:         1,
   LVUP_DEF_EVERY:   3,
 
@@ -1637,11 +1633,12 @@ const Dungeon = (() => {
     const allFloors = [];
     for (const r of rooms) for (const c of roomFloors(r)) allFloors.push(c);
 
-    // --- items: randInt(2,4)個。部屋床のみ・重複なし ---
+    // --- items: 個数は階で増やす（深い階は資源を増やし「最適行動なら勝てる」を支える）。
+    //     部屋床のみ・重複なし ---
     const itemKinds = Object.keys(DATA.ITEMS).filter(
       k => (DATA.ITEMS[k].minF ?? 1) <= floorNo
     );
-    const itemCount = randInt(CONFIG.ITEM_MIN, CONFIG.ITEM_MAX);
+    const itemCount = floorNo >= 10 ? randInt(3, 5) : randInt(CONFIG.ITEM_MIN, CONFIG.ITEM_MAX);
     const items = [];
     const itemPool = shuffle(allFloors);
     for (const c of itemPool) {
@@ -1681,11 +1678,12 @@ const Dungeon = (() => {
       used.add(keyOf(c.x, c.y));
     }
 
-    // --- enemies: randInt(3,5)体。部屋床・startからチェビシェフ3以上・相互重複なし ---
+    // --- enemies: 階に応じた数（浅い階は少なく＝B1-4は楽、深いほど増える）。
+    //     部屋床・startからチェビシェフ3以上・相互重複なし ---
     const enemyKinds = Object.keys(DATA.ENEMIES).filter(
       k => DATA.ENEMIES[k].minF <= floorNo && floorNo <= DATA.ENEMIES[k].maxF
     );
-    const enemyCount = randInt(CONFIG.ENEMY_INIT_MIN, CONFIG.ENEMY_INIT_MAX);
+    const enemyCount = Core.enemyInitCount(floorNo);
     const enemies = [];
     const enemyUsed = new Set([keyOf(start.x, start.y)]); // 敵同士のみ重複防止（アイテム/罠とは重なってよい）
     const enemyPool = shuffle(allFloors);
@@ -1708,6 +1706,46 @@ const Dungeon = (() => {
 // P4が move/attack/use 等の Core.act を拡張する前提で、構造は素直に保つ。
 
 const Core = {
+  /**
+   * フロア開始時の敵数（階に応じて増やす。B1-4は少なく＝楽、深いほど多い）。
+   * @param {number} floorNo
+   * @returns {number}
+   */
+  enemyInitCount(floorNo) {
+    let lo, hi;
+    if (floorNo <= 2)       { lo = 2; hi = 2; }   // 最序盤はごく少なく（チュートリアル帯）
+    else if (floorNo <= 4)  { lo = 2; hi = 3; }   // 序盤は楽に
+    else if (floorNo <= 9)  { lo = 3; hi = 5; }   // 5階以降に圧
+    else if (floorNo <= 18) { lo = 4; hi = 6; }
+    else if (floorNo <= 28) { lo = 5; hi = 7; }
+    else                    { lo = 6; hi = 8; }   // 深層は群れ
+    return randInt(lo, hi);
+  },
+
+  /**
+   * 追加湧きの間隔（ターン）。深いほど短い（圧を上げる）。
+   * @param {number} floorNo
+   * @returns {number}
+   */
+  spawnInterval(floorNo) {
+    if (floorNo <= 4)  return 40;   // 序盤はほぼ増えない
+    if (floorNo <= 15) return 22;
+    if (floorNo <= 28) return 16;
+    return 12;
+  },
+
+  /**
+   * フロア内の敵同時上限。深いほど多い。
+   * @param {number} floorNo
+   * @returns {number}
+   */
+  enemyCap(floorNo) {
+    if (floorNo <= 4)  return 5;
+    if (floorNo <= 15) return 9;
+    if (floorNo <= 28) return 11;
+    return 13;
+  },
+
   /**
    * レベル n から n+1 への必要経験値（§8.1）。
    * @param {number} n
@@ -1775,6 +1813,8 @@ const Core = {
    */
   newRun(name) {
     const d = Dungeon.generate(1);
+    // 初期持ち物：はちみつ×1（§8.1）。武器/盾はダンジョンで入手・装備する
+    const startInv = [{ kind: 'hachimitsu' }];
     return {
       name,
       floor: 1,
@@ -1795,7 +1835,7 @@ const Core = {
         satiety: CONFIG.PLAYER_SATIETY,
         maxSatiety: CONFIG.PLAYER_SATIETY,
         xp: 0,
-        inv: [{ kind: 'hachimitsu' }],
+        inv: startInv,
         weapon: null,
         shield: null,
         facing: { dx: 0, dy: 1 },
@@ -2484,8 +2524,8 @@ const Core = {
    */
   _spawnPhase(run) {
     run.spawnTick++;
-    if (run.spawnTick < CONFIG.SPAWN_EVERY_TURNS) return;
-    if (run.enemies.length >= CONFIG.ENEMY_CAP) return;
+    if (run.spawnTick < this.spawnInterval(run.floor)) return;
+    if (run.enemies.length >= this.enemyCap(run.floor)) return;
     run.spawnTick = 0;
 
     const playerRoom = this.roomAt(run, run.player.x, run.player.y);
