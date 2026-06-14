@@ -94,6 +94,8 @@ function lineToEnemy(run, maxR){
 
 // ---- ボット方策 ----
 function naivePolicy(run){
+  const p=run.player;
+  if(p.x===run.stairs.x && p.y===run.stairs.y){ Core.act(run,{type:'descend'}); return; }
   const adj=adjEnemies(run);
   if(adj.length){ faceAttack(run, adj[0]); return; }
   const s=stairStep(run);
@@ -164,17 +166,20 @@ function smartPolicy(run){
     faceAttack(run, adj[0]); return;
   }
 
-  // 7) XP稼ぎ：HP健全なら、近くの敵を倒してから降りる（underleveled回避＝最適行動）
-  //    視界内（同室 or 近接）の敵へ接近して各個撃破。HP低下時や敵が居ないときは階段へ。
+  // 7) XP稼ぎ：HP健全なら近場（距離<=5）かつ「寄っても2体以上に隣接しない」敵だけ各個撃破。
+  //    無理な深追いはしない（囲まれ防止）。
   if(hpRatio >= 0.6){
-    // 最寄り敵の隣マスへ一歩
     const toEnemy = stepToward(run, (x,y)=> run.enemies.some(e=>cheb(e.x,e.y,x,y)===0));
-    // 敵が手近（同室相当・距離<=6）にいる場合だけ寄る
-    const closest = run.enemies.reduce((m,e)=>{const d=cheb(e.x,e.y,p.x,p.y); return d<m?d:m;}, 99);
-    if(toEnemy && closest<=6){ Core.act(run,{type:'move',...toEnemy}); return; }
+    const closest = run.enemies.reduce((m,e)=>Math.min(m,cheb(e.x,e.y,p.x,p.y)), 99);
+    if(toEnemy && closest<=5){
+      const nx=p.x+toEnemy.dx, ny=p.y+toEnemy.dy;
+      const futureAdj=run.enemies.filter(e=>cheb(e.x,e.y,nx,ny)===1).length;
+      if(futureAdj<=1){ Core.act(run,{type:'move',...toEnemy}); return; }
+    }
   }
 
-  // 8) 階段へ
+  // 8) 階段へ（敵を片付けた or HP低下時）。階段上なら降りる
+  if(p.x===run.stairs.x && p.y===run.stairs.y){ Core.act(run,{type:'descend'}); return; }
   const s=stairStep(run);
   if(s){ Core.act(run,{type:'move',...s}); return; }
   Core.act(run,{type:'wait'});
@@ -186,9 +191,7 @@ function playOne(policy, maxFloor){
   while(!run.over && guard-- > 0){
     if(run.floor > maxFloor){ run.over = true; run.giveup = true; break; } // 上限到達は「勝ち抜け」
     const p=run.player;
-    // 階段の上なら降りる（賢者は一定の探索後・naiveは即降り）
-    if(p.x===run.stairs.x && p.y===run.stairs.y){ Core.act(run,{type:'descend'}); continue; }
-    // 眠り中は自動でwait
+    // 眠り中は自動でwait（降下・各個撃破の判断は policy が行う）
     if(p.sleep>0){ Core.act(run,{type:'wait'}); continue; }
     policy(run);
   }

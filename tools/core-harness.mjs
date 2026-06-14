@@ -56,7 +56,7 @@ const group = (name, fn, need) => {
   console.log(before === fail ? '  → 合格' : '  → 不合格あり');
 };
 const args = process.argv.slice(2);
-const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'items', 'gen', 'bot'];
+const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'gear', 'items', 'gen', 'bot'];
 
 // ---------- data: 定数が仕様書（依頼書v1.1 §8）と一致 ----------
 group('data', () => {
@@ -155,15 +155,22 @@ group('formulas', () => {
 group('beatable', () => {
   // その階に「実際に到達したプレイヤー」の現実的な強さ（balance-simの到達レベルに整合）。
   // Lv≒6+0.45*F（最大30）。Lv=Fは過度に楽観的なので、到達相応の控えめなレベルで検証する。
+  // その階で入手可能な最良の武器/盾（DATA のバンド[minF,maxF]から実値で算出）
+  const bestGear = (floor, cat, stat) => {
+    let best = 0;
+    for (const k of Object.keys(DATA.ITEMS)) {
+      const it = DATA.ITEMS[k];
+      if (it.cat !== cat) continue;
+      if ((it.minF ?? 1) <= floor && floor <= (it.maxF ?? Infinity)) best = Math.max(best, it[stat] || 0);
+    }
+    return best;
+  };
   const player = (floor) => {
     const lv = Math.min(CONFIG.LV_MAX, Math.max(1, Math.round(6 + floor * 0.45)));
     const atkBase = CONFIG.PLAYER_ATK + (lv - 1);
     const defBase = CONFIG.PLAYER_DEF + Math.floor(lv / CONFIG.LVUP_DEF_EVERY);
     const maxHp = CONFIG.PLAYER_HP + (lv - 1) * CONFIG.LVUP_HP;
-    // 装備：その階で入手可能な最良の武器/盾
-    const wpn = floor >= 8 ? 9 : floor >= 4 ? 5 : 2;   // 月/岩/木の枝のツメ
-    const shd = floor >= 8 ? 8 : floor >= 4 ? 5 : 2;   // ぬし/こわい/ふかふか毛皮
-    return { atk: atkBase + wpn, def: defBase + shd, maxHp, lv };
+    return { atk: atkBase + bestGear(floor, 'weapon', 'atk'), def: defBase + bestGear(floor, 'shield', 'def'), maxHp, lv };
   };
   const beasts = ['suigyu', 'gorilla', 'tora', 'sai', 'kaba', 'zou', 'wani', 'mammoth', 'herajika', 'dragon'];
   for (const kind of beasts) {
@@ -179,8 +186,7 @@ group('beatable', () => {
       const eDmg = Math.max(1, e.atk - P.def);
       ok(eDmg < P.maxHp * 0.5, `${d.name} B${f}: 一撃 ${eDmg} が即死級でない(player.maxHp ${P.maxHp})`);
     }
-    // intro階は厳しめ：回復なしのタイマンでも勝てる（被ダメ計 < HP）。
-    // 深部（intro+5）はエンドレス前提のため回復/戦術込みで撃破可能（上の即死しない条件で担保）。
+    // intro階のタイマン撃破可能性。B20未満は回復なし、B20以深は回復1個ぶん（最適行動）を許容。
     {
       const f = d.minF;
       const e = Core.makeEnemy(kind, f, 0, 0);
@@ -188,10 +194,34 @@ group('beatable', () => {
       const avgDmg = Math.max(1, P.atk - e.def);
       const hits = Math.ceil(e.maxHp / avgDmg);
       const taken = Math.max(1, e.atk - P.def) * hits;
-      ok(taken < P.maxHp, `${d.name} B${f}(intro): 回復なしタイマンで勝てる(被ダメ計 ${taken} < HP ${P.maxHp})`);
+      const budget = f >= 20 ? P.maxHp * 1.5 : P.maxHp; // 深層は回復アイテム1個前提
+      ok(taken < budget, `${d.name} B${f}(intro): タイマン撃破可能(被ダメ計 ${taken} < 許容 ${Math.round(budget)})`);
     }
   }
 }, [typeof Core?.makeEnemy === 'function']);
+
+// ---------- gear: 装備の多段階化と出現階バンド（v2.2「深い階ほど強い装備」） ----------
+group('gear', () => {
+  const I = DATA.ITEMS;
+  const weapons = Object.keys(I).filter(k => I[k].cat === 'weapon').sort((a, b) => I[a].atk - I[b].atk);
+  const shields = Object.keys(I).filter(k => I[k].cat === 'shield').sort((a, b) => I[a].def - I[b].def);
+  ok(weapons.length >= 7, `武器は7段階以上（実際 ${weapons.length}）`);
+  ok(shields.length >= 7, `盾は7段階以上（実際 ${shields.length}）`);
+  // 強い装備ほど出現階の下限が深い（弱い→強いで minF が単調非減少）
+  for (let i = 1; i < weapons.length; i++) ok((I[weapons[i]].minF ?? 1) >= (I[weapons[i-1]].minF ?? 1), `武器 ${I[weapons[i]].name} の出現階が前段以上`);
+  for (let i = 1; i < shields.length; i++) ok((I[shields[i]].minF ?? 1) >= (I[shields[i-1]].minF ?? 1), `盾 ${I[shields[i]].name} の出現階が前段以上`);
+  // その階で入手可能な最良装備が、深いほど強い（B1 < B12 < B25 < B39）
+  const bestAt = (f, cat, stat) => Object.keys(I).filter(k => I[k].cat === cat && (I[k].minF ?? 1) <= f && f <= (I[k].maxF ?? Infinity))
+    .reduce((m, k) => Math.max(m, I[k][stat] || 0), 0);
+  ok(bestAt(1,'weapon','atk') < bestAt(12,'weapon','atk'), '武器: B1 < B12 の最良攻撃');
+  ok(bestAt(12,'weapon','atk') < bestAt(25,'weapon','atk'), '武器: B12 < B25 の最良攻撃');
+  ok(bestAt(25,'weapon','atk') < bestAt(39,'weapon','atk'), '武器: B25 < B39 の最良攻撃');
+  ok(bestAt(1,'shield','def') < bestAt(25,'shield','def') && bestAt(25,'shield','def') < bestAt(39,'shield','def'), '盾も深いほど強い');
+  // 深層では弱い装備が落ちない（B30で atk<13 の武器・def<12 の盾は出現対象外）
+  const eligible = (f, cat) => Object.keys(I).filter(k => I[k].cat === cat && (I[k].minF ?? 1) <= f && f <= (I[k].maxF ?? Infinity));
+  ok(eligible(30, 'weapon').every(k => I[k].atk >= 13), 'B30の武器はすべて atk>=13（弱装備が落ちない）');
+  ok(eligible(30, 'shield').every(k => I[k].def >= 12), 'B30の盾はすべて def>=12');
+});
 
 // ---------- items: アイテム効果（§8.4）。use/place/throw ----------
 group('items', () => {

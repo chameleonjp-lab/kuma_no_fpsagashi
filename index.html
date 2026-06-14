@@ -1329,32 +1329,44 @@ const DATA = Object.freeze({
     hebi:       { name:'ねむりヘビ',            emoji:'🐍', hp:8,  atk:4, def:1, exp:9,  minF:7,        maxF:15,       ai:'sleep'   },
     inoshishi:  { name:'ぬしのイノシシ',        emoji:'🐗', hp:16, atk:6, def:2, exp:15, minF:10,       maxF:15,       ai:'boar'    },
     // --- 深層の新規大型獣（v2・依頼者指示）。理論上撃破可能なフラット基準値＋緩やかな床上昇（intro階基準・rate0.06）---
-    suigyu:     { name:'あばれ水牛',     emoji:'🐃', hp:30,  atk:8,  def:4,  exp:20,  minF:12, maxF:14,       ai:'boar',   scaleFrom:12, scaleRate:0.06 },
-    gorilla:    { name:'いわゴリラ',     emoji:'🦍', hp:40,  atk:11, def:6,  exp:30,  minF:15, maxF:17,       ai:'charge', scaleFrom:15, scaleRate:0.06 },
-    tora:       { name:'はやてのトラ',   emoji:'🐅', hp:38,  atk:14, def:5,  exp:40,  minF:18, maxF:21,       ai:'charge', scaleFrom:18, scaleRate:0.06 },
-    sai:        { name:'てつのサイ',     emoji:'🦏', hp:55,  atk:16, def:9,  exp:55,  minF:22, maxF:24,       ai:'boar',   scaleFrom:22, scaleRate:0.06 },
-    kaba:       { name:'のしかかりカバ', emoji:'🦛', hp:70,  atk:18, def:8,  exp:65,  minF:25, maxF:27,       ai:'charge', scaleFrom:25, scaleRate:0.06 },
-    zou:        { name:'おおきなゾウ',   emoji:'🐘', hp:85,  atk:21, def:10, exp:80,  minF:28, maxF:29,       ai:'charge', scaleFrom:28, scaleRate:0.06 },
-    wani:       { name:'かみつきワニ',   emoji:'🐊', hp:75,  atk:24, def:9,  exp:90,  minF:30, maxF:32,       ai:'charge', scaleFrom:30, scaleRate:0.06 },
-    mammoth:    { name:'こだいマンモス', emoji:'🦣', hp:100, atk:27, def:12, exp:105, minF:33, maxF:35,       ai:'boar',   scaleFrom:33, scaleRate:0.06 },
-    herajika:   { name:'まぼろしヘラジカ', emoji:'🫎', hp:95,  atk:30, def:11, exp:120, minF:36, maxF:38,       ai:'charge', scaleFrom:36, scaleRate:0.06 },
-    dragon:     { name:'ぬしのドラゴン', emoji:'🐉', hp:130, atk:34, def:14, exp:150, minF:39, maxF:Infinity, ai:'boar',   scaleFrom:39, scaleRate:0.06 },
+    suigyu:     { name:'あばれ水牛',     emoji:'🐃', hp:36,  atk:11, def:5,  exp:22,  minF:12, maxF:14,       ai:'boar',   scaleFrom:12, scaleRate:0.06 },
+    gorilla:    { name:'いわゴリラ',     emoji:'🦍', hp:46,  atk:14, def:7,  exp:32,  minF:15, maxF:17,       ai:'charge', scaleFrom:15, scaleRate:0.06 },
+    tora:       { name:'はやてのトラ',   emoji:'🐅', hp:48,  atk:18, def:7,  exp:42,  minF:18, maxF:21,       ai:'charge', scaleFrom:18, scaleRate:0.07 },
+    sai:        { name:'てつのサイ',     emoji:'🦏', hp:105, atk:31, def:13, exp:62,  minF:22, maxF:24,       ai:'boar',   scaleFrom:22, scaleRate:0.07 },
+    kaba:       { name:'のしかかりカバ', emoji:'🦛', hp:135, atk:36, def:15, exp:78,  minF:25, maxF:27,       ai:'charge', scaleFrom:25, scaleRate:0.07 },
+    zou:        { name:'おおきなゾウ',   emoji:'🐘', hp:165, atk:42, def:18, exp:94,  minF:28, maxF:29,       ai:'charge', scaleFrom:28, scaleRate:0.08 },
+    wani:       { name:'かみつきワニ',   emoji:'🐊', hp:155, atk:46, def:16, exp:104, minF:30, maxF:32,       ai:'charge', scaleFrom:30, scaleRate:0.08 },
+    mammoth:    { name:'こだいマンモス', emoji:'🦣', hp:205, atk:52, def:21, exp:120, minF:33, maxF:35,       ai:'boar',   scaleFrom:33, scaleRate:0.08 },
+    herajika:   { name:'まぼろしヘラジカ', emoji:'🫎', hp:195, atk:57, def:20, exp:136, minF:36, maxF:38,       ai:'charge', scaleFrom:36, scaleRate:0.08 },
+    dragon:     { name:'ぬしのドラゴン', emoji:'🐉', hp:235, atk:60, def:24, exp:168, minF:39, maxF:Infinity, ai:'boar',   scaleFrom:39, scaleRate:0.08 },
   }),
 
-  // アイテムデータ（§8.4の表から転記）
+  // アイテムデータ（§8.4＋v2.2で装備を多段階化。武器/盾は出現階バンド[minF,maxF]で
+  // 「深い階ほど強い装備が落ちる」を実現。食料/回復/投擲は maxF なし＝常時出現）
   ITEMS: Object.freeze({
     hachimitsu:  { name:'はちみつ',           cat:'food',   emoji:'🍯', satiety:50                          },
     sake:        { name:'おおきな鮭',          cat:'food',   emoji:'🐟', satiety:100, hp:5                   },
     kinomi:      { name:'山の木の実',          cat:'heal',   emoji:'🌰', hp:25                               },
+    ookinomi:    { name:'大きな木の実',        cat:'heal',   emoji:'🥥', hp:50, minF:12                      },
     hikaru:      { name:'ひかる木の実',        cat:'heal',   emoji:'✨', full:true, maxUp:2                   },
     matsubokkuri:{ name:'とがった松ぼっくり',  cat:'throw',  emoji:'🌲', dmg:10                              },
     shibire:     { name:'しびれ茸',            cat:'throw',  emoji:'🍄', stun:5                              },
-    tsume1:      { name:'木の枝のツメ',        cat:'weapon', emoji:'🪵', atk:2                               },
-    tsume2:      { name:'岩のツメ',            cat:'weapon', emoji:'🪨', atk:5                               },
-    tsume3:      { name:'月のツメ',            cat:'weapon', emoji:'🌙', atk:9, minF:8                       },
-    kegawa1:     { name:'ふかふか毛皮',        cat:'shield', emoji:'🧣', def:2                               },
-    kegawa2:     { name:'こわい毛皮',          cat:'shield', emoji:'🧥', def:5                               },
-    kegawa3:     { name:'ぬしの毛皮',          cat:'shield', emoji:'🦺', def:8, minF:8                       },
+    // --- 武器（ツメ）：8段階・出現階バンド ---
+    tsume1:      { name:'木の枝のツメ',        cat:'weapon', emoji:'🪵', atk:2,  minF:1,  maxF:6             },
+    tsume2:      { name:'岩のツメ',            cat:'weapon', emoji:'🪨', atk:5,  minF:3,  maxF:12            },
+    tsume3:      { name:'月のツメ',            cat:'weapon', emoji:'🌙', atk:9,  minF:8,  maxF:18            },
+    tsume4:      { name:'はがねのツメ',        cat:'weapon', emoji:'⚔️', atk:13, minF:13, maxF:25            },
+    tsume5:      { name:'りゅうのツメ',        cat:'weapon', emoji:'🗡️', atk:18, minF:19, maxF:32            },
+    tsume6:      { name:'まおうのツメ',        cat:'weapon', emoji:'🔱', atk:24, minF:26, maxF:40            },
+    tsume7:      { name:'でんせつのツメ',      cat:'weapon', emoji:'🪓', atk:31, minF:33                     },
+    // --- 盾（毛皮）：7段階・出現階バンド ---
+    kegawa1:     { name:'ふかふか毛皮',        cat:'shield', emoji:'🧣', def:2,  minF:1,  maxF:6             },
+    kegawa2:     { name:'こわい毛皮',          cat:'shield', emoji:'🧥', def:5,  minF:3,  maxF:12            },
+    kegawa3:     { name:'ぬしの毛皮',          cat:'shield', emoji:'🦺', def:8,  minF:8,  maxF:18            },
+    kegawa4:     { name:'はがねの毛皮',        cat:'shield', emoji:'🛡️', def:12, minF:13, maxF:25            },
+    kegawa5:     { name:'りゅうの毛皮',        cat:'shield', emoji:'🐲', def:16, minF:19, maxF:32            },
+    kegawa6:     { name:'まおうの毛皮',        cat:'shield', emoji:'👹', def:21, minF:26, maxF:40            },
+    kegawa7:     { name:'でんせつの毛皮',      cat:'shield', emoji:'🧱', def:27, minF:33                     },
   }),
 
   // 罠データ（§8.6の表から転記）
@@ -1634,10 +1646,12 @@ const Dungeon = (() => {
     for (const r of rooms) for (const c of roomFloors(r)) allFloors.push(c);
 
     // --- items: 個数は階で増やす（深い階は資源を増やし「最適行動なら勝てる」を支える）。
+    //     出現階バンド [minF, maxF] で絞る＝武器/盾は深い階ほど強い段階だけが落ちる。
     //     部屋床のみ・重複なし ---
-    const itemKinds = Object.keys(DATA.ITEMS).filter(
-      k => (DATA.ITEMS[k].minF ?? 1) <= floorNo
-    );
+    const itemKinds = Object.keys(DATA.ITEMS).filter(k => {
+      const d = DATA.ITEMS[k];
+      return (d.minF ?? 1) <= floorNo && floorNo <= (d.maxF ?? Infinity);
+    });
     const itemCount = floorNo >= 10 ? randInt(3, 5) : randInt(CONFIG.ITEM_MIN, CONFIG.ITEM_MAX);
     const items = [];
     const itemPool = shuffle(allFloors);
