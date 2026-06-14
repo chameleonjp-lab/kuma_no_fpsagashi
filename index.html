@@ -1958,6 +1958,8 @@ const Core = {
           const dmg = this.calcDamage(this._playerAtk(run), target.def);
           target.hp -= dmg;
           const ename = DATA.ENEMIES[target.kind].name;
+          // 攻撃エフェクト（爪痕＋敵の被弾点滅）。座標は攻撃先タイル
+          events.push({ t: 'fx', kind: 'attack', x: tx, y: ty, enemy: target });
           msg(ename + 'に ' + dmg + 'ダメージ');
           if (target.hp <= 0) {
             msg(ename + 'をたおした');
@@ -2092,6 +2094,7 @@ const Core = {
               // 松ぼっくり: ダメージ（倒せば経験値・ヤマアラシ反撃なし）
               target.hp -= ITEM_T.dmg;
               const ename = DATA.ENEMIES[target.kind].name;
+              events.push({ t: 'fx', kind: 'attack', x: cx, y: cy, enemy: target });
               msg(inameT + 'が ' + ename + ' に当たった！ ' + ITEM_T.dmg + 'ダメージ');
               if (target.hp <= 0) {
                 msg(ename + 'をたおした');
@@ -2283,6 +2286,8 @@ const Core = {
     const def = DATA.ENEMIES[e.kind];
     const dmg = this.calcDamage(e.atk, this._playerDef(run));
     p.hp -= dmg;
+    // 🐻への被弾エフェクト（点滅）
+    events.push({ t: 'fx', kind: 'bearHit' });
     msg(def.name + 'のこうげき！ ' + dmg + 'ダメージ');
     if (p.hp <= 0) {
       run.over = true;
@@ -2576,6 +2581,14 @@ const Game = {
       } else if (ev.t === 'needDir') {
         // 投擲アイテム: 方向選択オーバーレイを開く（ターン未消費・アイテム未消費）
         Menu.openDirOverlay(ev.idx);
+      } else if (ev.t === 'fx') {
+        // 戦闘エフェクト（描画層へ転送）
+        if (ev.kind === 'attack') {
+          Render.addClaw(ev.x, ev.y);
+          Render.flashEnemy(ev.enemy);
+        } else if (ev.kind === 'bearHit') {
+          Render.flashBear();
+        }
       }
       // 'descended' は特段の処理不要（ログは act 側で積まれる）
     }
@@ -2765,6 +2778,94 @@ const Render = (() => {
     ctx.fillText(emoji, cx, cy + 1);
   }
 
+  // ---- 戦闘エフェクト（時限）。CORE非依存。glueから addClaw/flashBear が呼ばれる ----
+  const FX_CLAW_MS = 260;   // 爪痕の表示時間
+  const FX_FLASH_MS = 200;  // 被弾点滅 0.2秒
+  const _claws = [];        // {x,y,until} 爪で引っ掻いた跡
+  let _bearFlashUntil = 0;  // 🐻被弾点滅の終了時刻
+  const nowMs = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+
+  /** 攻撃した方向のタイルに爪痕を出す（敵タイル座標） */
+  function addClaw(x, y) { _claws.push({ x, y, until: nowMs() + FX_CLAW_MS }); }
+  /** 🐻が被弾した点滅を開始 */
+  function flashBear() { _bearFlashUntil = nowMs() + FX_FLASH_MS; }
+  /** 敵オブジェクトに被弾点滅をセット（敵は移動するのでオブジェクトに持たせる） */
+  function flashEnemy(enemy) { if (enemy) enemy._flashUntil = nowMs() + FX_FLASH_MS; }
+
+  /** 点滅の可視判定（50ms周期で2回ほど明滅） */
+  function flashOn(until) {
+    const t = nowMs();
+    if (t >= until) return false;
+    const elapsed = FX_FLASH_MS - (until - t);
+    return Math.floor(elapsed / 50) % 2 === 0;
+  }
+
+  /** 爪痕（3本の引っ掻き線）をタイル中心に描く。alphaは残り時間で減衰 */
+  function drawClaw(ctx, cx, cy, alpha) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    const r = TILE * 0.42;
+    for (let i = -1; i <= 1; i++) {
+      const off = i * 7;
+      ctx.beginPath();
+      ctx.moveTo(cx - r + off, cy - r);
+      ctx.lineTo(cx + r + off, cy + r);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /** 被弾点滅の白オーバーレイ（タイル中心の円） */
+  function drawFlash(ctx, cx, cy) {
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(cx, cy, TILE * 0.42, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /** 敵の頭上に小さなHPバーを描く（現HP/最大HP） */
+  function drawHpBar(ctx, cx, cy, hp, maxHp) {
+    const w = TILE * 0.72, h = 4;
+    const x = cx - w / 2, y = cy - TILE / 2 + 1;
+    const ratio = Math.max(0, Math.min(1, hp / maxHp));
+    ctx.fillStyle = '#000';
+    ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+    ctx.fillStyle = '#5a1010';
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = ratio > 0.5 ? '#5ad24a' : ratio > 0.25 ? '#e6c020' : '#e05030';
+    ctx.fillRect(x, y, w * ratio, h);
+  }
+
+  /** 🐻の向いている隣接1マスに、薄い茶色の方向矢印を描く（空振り防止の視認性） */
+  function drawFacingArrow(ctx, run, camX, camY) {
+    const p = run.player;
+    const f = p.facing || { dx: 0, dy: 1 };
+    if (f.dx === 0 && f.dy === 0) return;
+    const tx = p.x + f.dx, ty = p.y + f.dy;
+    const cx = Math.round(tx * TILE - camX + TILE / 2);
+    const cy = Math.round(ty * TILE - camY + TILE / 2);
+    const ang = Math.atan2(f.dy, f.dx);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(ang);
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = '#b08850'; // 薄い茶色系
+    const s = TILE * 0.30;
+    ctx.beginPath();
+    ctx.moveTo(s, 0);
+    ctx.lineTo(-s * 0.5, -s * 0.7);
+    ctx.lineTo(-s * 0.5, s * 0.7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   /**
    * メインキャンバス描画。カメラはプレイヤータイル中心が画面中央（クランプなし）。
    * @param {object} run
@@ -2816,6 +2917,9 @@ const Render = (() => {
       }
     }
 
+    // --- 向き矢印（床の上・エンティティの下。薄い茶色） ---
+    if (!run.over) drawFacingArrow(ctx, run, camX, camY);
+
     // --- エンティティ（視界内のみ）：罠→アイテム→敵→プレイヤー ---
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -2835,17 +2939,31 @@ const Render = (() => {
       const cy = Math.round(it.y * TILE - camY + TILE / 2);
       drawEmoji(ctx, DATA.ITEMS[it.kind].emoji, cx, cy);
     }
-    // 敵
+    // 敵（絵文字＋頭上HPバー＋被弾点滅）
     for (const e of run.enemies) {
       if (!isVis(e.x, e.y)) continue;
       const cx = Math.round(e.x * TILE - camX + TILE / 2);
       const cy = Math.round(e.y * TILE - camY + TILE / 2);
       drawEmoji(ctx, DATA.ENEMIES[e.kind].emoji, cx, cy);
+      drawHpBar(ctx, cx, cy, e.hp, e.maxHp);
+      if (e._flashUntil && flashOn(e._flashUntil)) drawFlash(ctx, cx, cy);
     }
     // プレイヤー（常に最前面・画面中央）
     const pcx = Math.round(p.x * TILE - camX + TILE / 2);
     const pcy = Math.round(p.y * TILE - camY + TILE / 2);
     drawEmoji(ctx, DATA.PLAYER_EMOJI, pcx, pcy);
+    if (flashOn(_bearFlashUntil)) drawFlash(ctx, pcx, pcy);
+
+    // --- 爪痕エフェクト（時限・最前面） ---
+    const t = nowMs();
+    for (let i = _claws.length - 1; i >= 0; i--) {
+      const c = _claws[i];
+      if (t >= c.until) { _claws.splice(i, 1); continue; }
+      if (!isVis(c.x, c.y)) continue;
+      const cx = Math.round(c.x * TILE - camX + TILE / 2);
+      const cy = Math.round(c.y * TILE - camY + TILE / 2);
+      drawClaw(ctx, cx, cy, (c.until - t) / FX_CLAW_MS);
+    }
 
     // --- 吹き出し（独り言。文言制御はP6・ここは描画のみ） ---
     if (run.bubbleText) drawBubble(ctx, run.bubbleText, pcx, pcy - TILE / 2);
@@ -2937,7 +3055,7 @@ const Render = (() => {
     ctx.fillRect(run.player.x * S, run.player.y * S, 2, 3);
   }
 
-  return { resize, draw, drawMini };
+  return { resize, draw, drawMini, addClaw, flashBear, flashEnemy };
 })();
 
 // ==== SECTION: HUD-LOG ====
