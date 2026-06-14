@@ -143,12 +143,19 @@ group('formulas', () => {
   ok(Core.deepScale(16, 20) === Math.ceil(16 * 1.5), 'B20 ×1.5');
   ok(Core.deepScale(6, 30) === Math.ceil(6 * 2.5), 'B30 ×2.5');
   ok(Core.deepScale(0, 25) === 0, '防御0は0のまま');
+  // 低攻撃は spread=1（従来どおり ±1）
   const seen = new Set();
   for (let i = 0; i < 3000; i++) seen.add(Core.calcDamage(5, 2));
   ok([...seen].every(v => v >= 2 && v <= 4) && seen.size === 3, 'calcDamage(5,2)∈{2,3,4}全出現');
   const seen2 = new Set();
   for (let i = 0; i < 1000; i++) seen2.add(Core.calcDamage(1, 9));
   ok(seen2.size === 1 && seen2.has(1), 'calcDamage(1,9)=1（最低保証）');
+  // 高攻撃は spread=round(atk*0.08)（装備依存で振れ幅が育つ）。atk40,def10 → 中心30・±3
+  const hi = new Set();
+  for (let i = 0; i < 5000; i++) hi.add(Core.calcDamage(40, 10));
+  const spread = Math.max(1, Math.round(40 * 0.08));
+  ok([...hi].every(v => v >= 30 - spread && v <= 30 + spread) && hi.size === spread * 2 + 1,
+    `calcDamage(40,10)∈[${30-spread},${30+spread}]・幅±${spread}（装備依存）`);
 }, [typeof Core?.xpNeed === 'function']);
 
 // ---------- beatable: 新規深層獣が「理論上撃破可能」か（v2） ----------

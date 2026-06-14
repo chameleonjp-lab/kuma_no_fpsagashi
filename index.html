@@ -1807,7 +1807,9 @@ const Core = {
    * @returns {number}
    */
   calcDamage(atk, def) {
-    return Math.max(1, atk - def + randInt(-1, 1));
+    // 乱数幅は攻撃力依存（原作の±約10%に寄せる）。強い武器ほど振れ幅が育ち滑らかに。
+    const spread = Math.max(1, Math.round(atk * 0.08));
+    return Math.max(1, atk - def + randInt(-spread, spread));
   },
 
   /**
