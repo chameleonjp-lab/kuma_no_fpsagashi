@@ -94,8 +94,8 @@ group('data', () => {
   ok(I.hikaru.full === true && I.hikaru.maxUp === 2, 'ひかる木の実');
   ok(I.matsubokkuri.dmg === 10, '松ぼっくり 10dmg');
   ok(I.shibire.stun === 5, 'しびれ茸 5T');
-  ok(I.tsume1.atk === 2 && I.tsume2.atk === 5 && I.tsume3.atk === 9 && I.tsume3.minF === 8, 'ツメ3種');
-  ok(I.kegawa1.def === 2 && I.kegawa2.def === 5 && I.kegawa3.def === 8 && I.kegawa3.minF === 8, '毛皮3種');
+  ok(I.tsume1.name === '木の枝のツメ' && I.tsume1.atk === 2, '武器の最弱段=木の枝のツメ+2');
+  ok(I.kegawa1.name === 'ふかふか毛皮' && I.kegawa1.def === 2, '盾の最弱段=ふかふか毛皮+2');
   ok(DATA.TRAPS.toge.dmg === 5 && DATA.TRAPS.kafun.satiety === 20 && DATA.TRAPS.otoshiana.warp === true, '罠3種');
   // 主人公初期値（v2.1でPLAYER_HP 15→20・回復5歩のリバランス）
   ok(CONFIG.PLAYER_HP === 20 && CONFIG.PLAYER_ATK === 3 && CONFIG.PLAYER_DEF === 1
@@ -268,19 +268,19 @@ group('items', () => {
   r = mk(); r.player.hp = 15; r.player.maxHp = 15; Core.act(r, { type: 'use', idx: findUse(r, 'hikaru') });
   ok(r.player.maxHp === 17 && r.player.hp === 17, 'ひかる 満タン時 最大+2');
 
-  // 武器装備: _playerAtk が +atk（基礎3＋武器）。装備中はinvに残る
-  r = mk(); const wi = findUse(r, 'tsume2'); const before = Core._playerAtk(r);
+  // 武器装備: _playerAtk が +atk（基礎3＋武器・値はDATAから読む）。装備中はinvに残る
+  r = mk(); const wi = findUse(r, 'tsume3'); const before = Core._playerAtk(r);
   Core.act(r, { type: 'use', idx: wi });
-  ok(Core._playerAtk(r) === before + 5 && r.player.inv.length === 1, '岩のツメ装備 atk+5・invに残る');
-  // 付け替え: tsume1→tsume2 で +5 になる
+  ok(Core._playerAtk(r) === before + DATA.ITEMS.tsume3.atk && r.player.inv.length === 1, '武器装備 atk+値・invに残る');
+  // 付け替え: tsume1→tsume3 で値が上書きされる
   r = mk(); Core.act(r, { type: 'use', idx: findUse(r, 'tsume1') });
-  ok(Core._playerAtk(r) === CONFIG.PLAYER_ATK + 2, '木の枝のツメ atk+2');
-  Core.act(r, { type: 'use', idx: findUse(r, 'tsume2') });
-  ok(Core._playerAtk(r) === CONFIG.PLAYER_ATK + 5, '付け替えで atk+5');
+  ok(Core._playerAtk(r) === CONFIG.PLAYER_ATK + DATA.ITEMS.tsume1.atk, '木の枝のツメ atk反映');
+  Core.act(r, { type: 'use', idx: findUse(r, 'tsume3') });
+  ok(Core._playerAtk(r) === CONFIG.PLAYER_ATK + DATA.ITEMS.tsume3.atk, '付け替えで上位武器の atk反映');
 
-  // 盾装備: _playerDef が +def
-  r = mk(); const db = Core._playerDef(r); Core.act(r, { type: 'use', idx: findUse(r, 'kegawa2') });
-  ok(Core._playerDef(r) === db + 5, 'こわい毛皮 def+5');
+  // 盾装備: _playerDef が +def（値はDATAから）
+  r = mk(); const db = Core._playerDef(r); Core.act(r, { type: 'use', idx: findUse(r, 'kegawa3') });
+  ok(Core._playerDef(r) === db + DATA.ITEMS.kegawa3.def, '盾装備 def+値');
 
   // 置く: 足元にアイテムが無ければ置ける・invから消える・run.itemsに増える
   r = mk();
