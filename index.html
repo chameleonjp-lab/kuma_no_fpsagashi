@@ -1351,6 +1351,8 @@ const DATA = Object.freeze({
     hikaru:      { name:'ひかる木の実',        cat:'heal',   emoji:'✨', full:true, maxUp:2                   },
     matsubokkuri:{ name:'とがった松ぼっくり',  cat:'throw',  emoji:'🌲', dmg:10                              },
     shibire:     { name:'しびれ茸',            cat:'throw',  emoji:'🍄', stun:5                              },
+    korogari:    { name:'ころ石',              cat:'throw',  emoji:'🥌', dmg:5                               },
+    tsukibane:   { name:'月羽の矢',            cat:'throw',  emoji:'🏹', dmg:14, pierce:true, minF:12        },
     // --- 武器（ツメ）：14段階・出現階バンド（深い階ほど強い段階だけが落ちる）---
     tsume1:      { name:'木の枝のツメ',        cat:'weapon', emoji:'🪵', atk:2,  minF:1,  maxF:6             },
     tsume2:      { name:'きばのツメ',          cat:'weapon', emoji:'🦷', atk:4,  minF:3,  maxF:10            },
@@ -1394,6 +1396,11 @@ const DATA = Object.freeze({
                    effects:[ { on:'onAttacked', do:'counter', power:2 } ] },
     kegawaIkazuchi:{ name:'いかずち毛皮',  cat:'shield', emoji:'🌩️', def:10, minF:19, maxF:32,
                    effects:[ { on:'onAttacked', do:'counter', power:5, chance:0.5 } ] },
+    // --- FP（相棒）の最終装備セット🐾（深層限定・到達の証。FP本体は非アイテムのゴール）---
+    tsumeFP:     { name:'FPのツメ',        cat:'weapon', emoji:'🐾', atk:26, minF:30,
+                   effects:[ { on:'passive', do:'atkOnLowHp', power:22 } ] },
+    kegawaFP:    { name:'FPの毛皮',        cat:'shield', emoji:'🐾', def:22, minF:30,
+                   effects:[ { on:'onLethal', do:'survive' } ] },
   }),
 
   // 罠データ（§8.6の表から転記）
@@ -1917,6 +1924,7 @@ const Core = {
     run.explored = Core._blankBool();
     run.stairsSeen = false;
     run.spawnTick = 0;
+    run.fpGuardUsed = false; // FPの毛皮の「かばう」はフロアにつき1回
   },
 
   /**
@@ -2023,10 +2031,33 @@ const Core = {
     return msgs;
   },
 
-  /** プレイヤーの総攻撃力（基礎＋武器補正） */
+  /** プレイヤーの総攻撃力（基礎＋武器補正＋常時修飾） */
   _playerAtk(run) {
     const p = run.player;
-    return p.atkBase + (p.weapon ? (DATA.ITEMS[p.weapon.kind].atk || 0) : 0);
+    let atk = p.atkBase + (p.weapon ? (DATA.ITEMS[p.weapon.kind].atk || 0) : 0);
+    // 装備の常時攻撃修飾（FPのツメ: HPが減るほど攻撃up＝背水）
+    for (const ef of this._gearEffects(run, 'passive')) {
+      if (ef.do === 'atkOnLowHp') atk += Math.round((1 - p.hp / p.maxHp) * ef.power);
+    }
+    return atk;
+  },
+
+  /**
+   * 致死ダメージを装備で一度だけしのげるか（FPの毛皮: 相棒がかばう・フロアにつき1回）。
+   * しのげたら hp=1 にして true。各死亡判定の直前に呼ぶ。
+   * @param {object} run
+   * @param {Array} events
+   * @returns {boolean}
+   */
+  _lethalGuard(run, events) {
+    const sh = run.player.shield;
+    if (!sh || run.fpGuardUsed) return false;
+    const d = DATA.ITEMS[sh.kind];
+    if (!d.effects || !d.effects.some(e => e.on === 'onLethal' && e.do === 'survive')) return false;
+    run.fpGuardUsed = true;
+    run.player.hp = 1;
+    events.push({ t: 'msg', text: '相棒の毛皮が熊をかばった！' });
+    return true;
   },
 
   /** プレイヤーの総防御力（基礎＋盾補正） */
@@ -2146,7 +2177,7 @@ const Core = {
             if (target.hp > 0 && DATA.ENEMIES[target.kind].ai === 'counter') {
               p.hp -= 1;
               msg('とげが刺さった！');
-              if (p.hp <= 0) {
+              if (p.hp <= 0 && !this._lethalGuard(run, events)) {
                 run.over = true;
                 run.deathCause = 'とげとげヤマアラシ';
                 msg('熊はたおれた…');
@@ -2301,7 +2332,8 @@ const Core = {
               const ename = DATA.ENEMIES[target.kind].name;
               msg(ename + 'はしびれている！');
             }
-            break;
+            // 貫通(月羽の矢など)は敵を抜けて直線上の次へ。それ以外は最初の敵で停止
+            if (!ITEM_T.pierce) break;
           }
           cx += dx; cy += dy;
         }
@@ -2351,7 +2383,7 @@ const Core = {
       if (td.dmg) {
         p.hp -= td.dmg;
         msg(td.name + 'だ！ ' + td.dmg + 'ダメージ');
-        if (p.hp <= 0) {
+        if (p.hp <= 0 && !this._lethalGuard(run, events)) {
           run.over = true;
           run.deathCause = 'とげの床';
           msg('熊はたおれた…');
@@ -2480,7 +2512,7 @@ const Core = {
     // 🐻への被弾エフェクト（点滅）
     events.push({ t: 'fx', kind: 'bearHit' });
     msg(def.name + 'のこうげき！ ' + dmg + 'ダメージ');
-    if (p.hp <= 0) {
+    if (p.hp <= 0 && !this._lethalGuard(run, events)) {
       run.over = true;
       run.deathCause = def.name;
       msg('熊はたおれた…');
@@ -2611,7 +2643,7 @@ const Core = {
     // 満腹度0：毎ターンHP-1
     if (p.satiety === 0) {
       p.hp -= 1;
-      if (p.hp <= 0) {
+      if (p.hp <= 0 && !this._lethalGuard(run, events)) {
         run.over = true;
         run.deathCause = '飢え';
         msg('熊はたおれた…');

@@ -306,6 +306,36 @@ group('gearfx', () => {
     Core.act(r, {type:'attack'});
     ok(r.player.satiety === s0 && r.enemies[0].stun === 0, '効果なし装備はフック無反応（回帰なし）');
   }
+  // FPのツメ: HPが減るほど攻撃が上がる（背水）。満タンで素、瀕死で大幅up
+  {
+    const r = setup('tsumeFP', null);
+    r.player.hp = r.player.maxHp; const full = Core._playerAtk(r);
+    r.player.hp = 1; const low = Core._playerAtk(r);
+    ok(low > full + 15, `FPのツメ 瀕死で攻撃up (満タン${full}→瀕死${low})`);
+  }
+  // FPの毛皮: 致死を一度だけしのぐ（hp=1で生存）。同フロアの2度目は防げない
+  {
+    const r = setup(null, 'kegawaFP');
+    r.player.hp = 3; r.fpGuardUsed = false;
+    r.enemies = [{x:11,y:10,kind:'inoshishi',hp:99,maxHp:99,atk:99,def:0,exp:15,stun:0,cool:0}];
+    Core.act(r, {type:'wait'}); // 致死攻撃を受ける
+    ok(!r.over && r.player.hp === 1, 'FPの毛皮 致死を1回しのぐ(hp=1生存)');
+    r.player.hp = 3;
+    Core.act(r, {type:'wait'}); // 2度目はしのげない
+    ok(r.over, 'FPの毛皮 同フロア2度目は致死で終了');
+  }
+  // 月羽の矢: 貫通＝直線上の複数の敵にダメージ
+  {
+    const r = setup(null, null);
+    r.player.facing = {dx:1,dy:0}; r.player.inv = [{kind:'tsukibane'}];
+    for (let k=1;k<=3;k++) r.map.tiles[r.player.y][r.player.x+k] = 1;
+    r.enemies = [
+      {x:r.player.x+1,y:r.player.y,kind:'hachi',hp:99,maxHp:99,atk:0,def:0,exp:2,stun:0,cool:0},
+      {x:r.player.x+2,y:r.player.y,kind:'hachi',hp:99,maxHp:99,atk:0,def:0,exp:2,stun:0,cool:0},
+    ];
+    Core.act(r, {type:'throw', idx:0, dir:{dx:1,dy:0}});
+    ok(r.enemies[0].hp < 99 && r.enemies[1].hp < 99, '月羽の矢 貫通で2体ともダメージ');
+  }
 }, [typeof Core?._gearEffects === 'function']);
 
 // ---------- items: アイテム効果（§8.4）。use/place/throw ----------
@@ -377,10 +407,10 @@ group('items', () => {
 
   // 投擲: 直線上の敵に matsubokkuri 10ダメージ・item消費
   r = mk();
-  r.player.facing = { dx: 1, dy: 0 };
-  // プレイヤーの右方向3マスを床にして敵を置く（部屋内で確保できない場合に備え強制床）
+  // プレイヤーを内側の安全位置へ固定（端スポーンで右方向が盤外になる揺れを防ぐ）
+  r.player.x = 5; r.player.y = 5; r.player.facing = { dx: 1, dy: 0 };
   const px = r.player.x, py = r.player.y;
-  for (let k = 1; k <= 3; k++) if (r.map.tiles[py] && px + k < CONFIG.MAP_W) r.map.tiles[py][px + k] = 1;
+  for (let k = 1; k <= 4; k++) r.map.tiles[py][px + k] = 1;
   r.enemies = [{ x: px + 2, y: py, kind: 'hachi', hp: 20, maxHp: 20, atk: 2, def: 0, exp: 2, stun: 0, cool: 0 }];
   const ti = findUse(r, 'matsubokkuri');
   Core.act(r, { type: 'throw', idx: ti, dir: { dx: 1, dy: 0 } });
@@ -388,8 +418,8 @@ group('items', () => {
   ok(r.player.inv.length === 0, '松ぼっくり 投擲で消費');
 
   // 投擲: しびれ茸で麻痺。隣接敵に投げても投擲ターンに反撃されず（即時麻痺）、麻痺が継続する
-  r = mk(); r.player.facing = { dx: 1, dy: 0 }; r.player.hp = 15; r.player.maxHp = 15;
-  for (let k = 1; k <= 3; k++) if (r.map.tiles[r.player.y] && r.player.x + k < CONFIG.MAP_W) r.map.tiles[r.player.y][r.player.x + k] = 1;
+  r = mk(); r.player.x = 5; r.player.y = 5; r.player.facing = { dx: 1, dy: 0 }; r.player.hp = 15; r.player.maxHp = 15;
+  for (let k = 1; k <= 4; k++) r.map.tiles[r.player.y][r.player.x + k] = 1;
   // 敵を隣接（距離1）に置く。麻痺が無ければ敵フェーズで反撃される配置
   r.enemies = [{ x: r.player.x + 1, y: r.player.y, kind: 'hachi', hp: 20, maxHp: 20, atk: 5, def: 0, exp: 2, stun: 0, cool: 0 }];
   Core.act(r, { type: 'throw', idx: findUse(r, 'shibire'), dir: { dx: 1, dy: 0 } });
