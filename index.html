@@ -1386,8 +1386,14 @@ const DATA = Object.freeze({
                    effects:[ { on:'onHit', do:'status', status:'stun', dur:2, chance:0.18 } ] },
     tsumeOgre:   { name:'こぐまの大剣',    cat:'weapon', emoji:'🪓', atk:28, minF:26, maxF:40,
                    effects:[ { on:'onAttackCost', do:'satiety', power:-2 } ] },
+    tsumeMitsu:  { name:'みつぬりのツメ',  cat:'weapon', emoji:'🍯', atk:13, minF:13, maxF:25,
+                   effects:[ { on:'onHit', do:'lifesteal', power:0.25 } ] },
+    tsumeHayate: { name:'はやてのツメ',    cat:'weapon', emoji:'🪶', atk:16, minF:18, maxF:30,
+                   effects:[ { on:'onHit', do:'extraStrike', chance:0.30 } ] },
     kegawaToge:  { name:'とげ毛皮',        cat:'shield', emoji:'🌵', def:4,  minF:6,  maxF:16,
                    effects:[ { on:'onAttacked', do:'counter', power:2 } ] },
+    kegawaIkazuchi:{ name:'いかずち毛皮',  cat:'shield', emoji:'🌩️', def:10, minF:19, maxF:32,
+                   effects:[ { on:'onAttacked', do:'counter', power:5, chance:0.5 } ] },
   }),
 
   // 罠データ（§8.6の表から転記）
@@ -2112,16 +2118,32 @@ const Core = {
             if (idx >= 0) run.enemies.splice(idx, 1);
             for (const m of this._gainXp(run, target.exp)) msg(m);
           } else {
-            // 武器の命中時効果（眠り付与など。生存している敵に適用・F1）
+            // 武器の命中時効果（生存している敵に適用・F1）
             for (const ef of this._gearEffects(run, 'onHit')) {
               if (ef.chance != null && Math.random() >= ef.chance) continue;
               if (ef.do === 'status' && ef.status === 'stun') {
                 target.stun = Math.max(target.stun, ef.dur);
                 msg(ename + 'はねむってしまった！');
+              } else if (ef.do === 'lifesteal') {
+                const heal = Math.max(1, Math.round(dmg * ef.power));
+                p.hp = Math.min(p.maxHp, p.hp + heal);
+                msg('熊は ' + heal + ' 回復した');
+              } else if (ef.do === 'extraStrike') {
+                const ex = this.calcDamage(this._playerAtk(run), target.def);
+                target.hp -= ex;
+                msg(ename + 'に追い打ち ' + ex + 'ダメージ');
+                if (target.hp <= 0) {
+                  msg(ename + 'をたおした');
+                  msg('経験値を ' + target.exp + ' かくとく');
+                  const idx = run.enemies.indexOf(target);
+                  if (idx >= 0) run.enemies.splice(idx, 1);
+                  for (const m of this._gainXp(run, target.exp)) msg(m);
+                  break; // 敵は倒れた。残りの命中時効果は打ち切り
+                }
               }
             }
-            // ヤマアラシは生存時のみ固定1反撃
-            if (DATA.ENEMIES[target.kind].ai === 'counter') {
+            // ヤマアラシは生存時のみ固定1反撃（追い打ちで倒していたら反撃なし）
+            if (target.hp > 0 && DATA.ENEMIES[target.kind].ai === 'counter') {
               p.hp -= 1;
               msg('とげが刺さった！');
               if (p.hp <= 0) {

@@ -225,10 +225,10 @@ group('gear', () => {
   ok(bestAt(12,'weapon','atk') < bestAt(25,'weapon','atk'), '武器: B12 < B25 の最良攻撃');
   ok(bestAt(25,'weapon','atk') < bestAt(39,'weapon','atk'), '武器: B25 < B39 の最良攻撃');
   ok(bestAt(1,'shield','def') < bestAt(25,'shield','def') && bestAt(25,'shield','def') < bestAt(39,'shield','def'), '盾も深いほど強い');
-  // 深層では弱い装備が落ちない（B30で atk<13 の武器・def<12 の盾は出現対象外）
-  const eligible = (f, cat) => Object.keys(I).filter(k => I[k].cat === cat && (I[k].minF ?? 1) <= f && f <= (I[k].maxF ?? Infinity));
-  ok(eligible(30, 'weapon').every(k => I[k].atk >= 13), 'B30の武器はすべて atk>=13（弱装備が落ちない）');
-  ok(eligible(30, 'shield').every(k => I[k].def >= 12), 'B30の盾はすべて def>=12');
+  // 深層では弱い「素」装備が落ちない（効果違い装備=effects持ちは火力/防御を効果と交換するので対象外）
+  const eligiblePure = (f, cat) => Object.keys(I).filter(k => I[k].cat === cat && !I[k].effects && (I[k].minF ?? 1) <= f && f <= (I[k].maxF ?? Infinity));
+  ok(eligiblePure(30, 'weapon').every(k => I[k].atk >= 13), 'B30の素武器はすべて atk>=13（弱装備が落ちない）');
+  ok(eligiblePure(30, 'shield').every(k => I[k].def >= 12), 'B30の素盾はすべて def>=12');
 });
 
 // ---------- gearfx: 特殊効果つき装備（命中時/被弾時フック・F1） ----------
@@ -273,6 +273,30 @@ group('gearfx', () => {
     r.player.facing = {dx:1,dy:0}; r.player.satiety = 100; r.enemies = [];
     Core.act(r, {type:'attack'}); // 空振りでもコストはかかる
     ok(r.player.satiety <= 98, `こぐまの大剣 攻撃で満腹コスト (満腹 ${r.player.satiety})`);
+  }
+  // みつぬりのツメ: 命中で吸収回復（HPが戻る）
+  {
+    const r = setup('tsumeMitsu', null);
+    r.player.facing = {dx:1,dy:0}; r.player.hp = 50; r.player.maxHp = 200;
+    r.enemies = [{x:11,y:10,kind:'hachi',hp:999,maxHp:999,atk:0,def:0,exp:2,stun:0,cool:0}];
+    Core.act(r, {type:'attack'});
+    ok(r.player.hp > 50, `みつぬりのツメ 命中で吸収回復 (HP ${r.player.hp})`);
+  }
+  // はやてのツメ: 命中で確率追い打ち（多数試行で総ダメージが素の1.2倍以上になる回がある）
+  {
+    let extra = 0, trials = 400;
+    for (let i = 0; i < trials; i++) {
+      const r = setup('tsumeHayate', null);
+      r.player.facing = {dx:1,dy:0};
+      const before = 999;
+      r.enemies = [{x:11,y:10,kind:'hachi',hp:before,maxHp:before,atk:0,def:0,exp:2,stun:0,cool:0}];
+      Core.act(r, {type:'attack'});
+      const dealt = before - (r.enemies[0] ? r.enemies[0].hp : before);
+      // 素の1撃は atk16±spread。追い打ちが出ると概ね2倍域
+      if (dealt > 24) extra++;
+    }
+    const rate = extra/trials;
+    ok(rate > 0.18 && rate < 0.45, `はやてのツメ 追い打ち率~30% (実測 ${(rate*100).toFixed(0)}%)`);
   }
   // 効果なし装備は従来どおり（フックで余計な事が起きない）
   {
