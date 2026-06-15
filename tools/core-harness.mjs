@@ -56,7 +56,7 @@ const group = (name, fn, need) => {
   console.log(before === fail ? '  → 合格' : '  → 不合格あり');
 };
 const args = process.argv.slice(2);
-const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'gear', 'gearfx', 'items', 'herb', 'wand', 'gen', 'bot'];
+const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'gear', 'gearfx', 'items', 'herb', 'wand', 'charm', 'gen', 'bot'];
 
 // ---------- data: 定数が仕様書（依頼書v1.1 §8）と一致 ----------
 group('data', () => {
@@ -555,6 +555,50 @@ group('wand', () => {
     ok(res.turnSpent === false, 'からっぽの杖は不発（ターン消費なし）');
   }
 }, [typeof Core?._pushEnemy === 'function']);
+
+// ---------- charm: 飾り（常時効果・accessory1枠）・F5 ----------
+group('charm', () => {
+  const mk = () => { const r = Core.newRun('charm'); r.player.inv = []; r.player.accessory = null; r.enemies = []; return r; };
+  const equip = (r, kind) => { r.player.inv.push({kind}); Core.act(r, {type:'use', idx: r.player.inv.length - 1}); };
+  // ちからの腕かざり: 常時 攻撃+3
+  {
+    const r = mk(); const a0 = Core._playerAtk(r);
+    equip(r, 'kazariChikara');
+    ok(r.player.accessory && r.player.accessory.kind === 'kazariChikara', '飾りがaccessoryに装備される');
+    ok(Core._playerAtk(r) === a0 + 3, 'ちからの腕かざり 常時攻撃+3');
+  }
+  // まもりの腕かざり: 常時 防御+3
+  {
+    const r = mk(); const d0 = Core._playerDef(r);
+    equip(r, 'kazariMamori');
+    ok(Core._playerDef(r) === d0 + 3, 'まもりの腕かざり 常時防御+3');
+  }
+  // もろば牙の輪: 攻+7・防-4（諸刃）。防御は0未満にならない（クランプ）ので基礎防御を持たせて検証
+  {
+    const r = mk(); r.player.defBase = 10; const a0 = Core._playerAtk(r), d0 = Core._playerDef(r);
+    equip(r, 'kazariMoroha');
+    ok(Core._playerAtk(r) === a0 + 7 && Core._playerDef(r) === d0 - 4, 'もろば牙の輪 攻+7/防-4');
+  }
+  // ねむけよけの鈴: 常時 眠り無効
+  {
+    const r = mk(); equip(r, 'kazariNemuke');
+    r.player.hp = 500; r.player.maxHp = 500;
+    const W = CONFIG.MAP_W, H = CONFIG.MAP_H, t = [];
+    for (let y=0;y<H;y++){const row=[];for(let x=0;x<W;x++)row.push((x===0||y===0||x===W-1||y===H-1)?0:1);t.push(row);}
+    r.map.tiles = t; r.rooms = [{x:1,y:1,w:W-2,h:H-2}]; r.player.x = 5; r.player.y = 5;
+    r.enemies = [{x:6,y:5,kind:'hebi',hp:99,maxHp:99,atk:4,def:0,exp:9,stun:0,confuse:0,cool:0}];
+    let slept = false;
+    for (let i=0;i<40 && !slept;i++){ Core.act(r,{type:'wait'}); if (r.player.sleep>0) slept=true; }
+    ok(!slept, 'ねむけよけの鈴 常時で眠らない');
+  }
+  // 外す: accessoryを外すと効果が消える
+  {
+    const r = mk(); const a0 = Core._playerAtk(r);
+    equip(r, 'kazariChikara');
+    Core.act(r, {type:'unequip', slot:'accessory'});
+    ok(r.player.accessory === null && Core._playerAtk(r) === a0, '飾りを外すと常時効果が消える');
+  }
+}, [typeof Core?._gearEffects === 'function']);
 
 // ---------- gen: フロア生成の健全性（連結性ほか） ----------
 group('gen', () => {

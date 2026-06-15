@@ -1365,6 +1365,11 @@ const DATA = Object.freeze({
     edaNemu:     { name:'ねむらせ枝',   cat:'wand', emoji:'🪄', charges:4, minF:6,  effects:[ { on:'zap', target:'front', do:'status', status:'stun', power:4 } ] },
     edaBasho:    { name:'場所がえ枝',   cat:'wand', emoji:'🪄', charges:5, minF:10, effects:[ { on:'zap', target:'front', do:'swap' } ] },
     edaIyashi:   { name:'いやし枝',     cat:'wand', emoji:'🪄', charges:4, minF:12, effects:[ { on:'zap', target:'self',  do:'heal',   power:25 } ] },
+    // --- 飾り（常時効果・accessory1枠）・F5。絵文字は共通マーカー🔔＋名前で区別 ---
+    kazariChikara:{ name:'ちからの腕かざり', cat:'charm', emoji:'🔔', minF:5,  effects:[ { on:'passive', do:'statAdd', stat:'atk', power:3 } ] },
+    kazariMamori: { name:'まもりの腕かざり', cat:'charm', emoji:'🔔', minF:5,  effects:[ { on:'passive', do:'statAdd', stat:'def', power:3 } ] },
+    kazariNemuke: { name:'ねむけよけの鈴',   cat:'charm', emoji:'🔔', minF:7,  effects:[ { on:'passive', do:'sleepGuard' } ] },
+    kazariMoroha: { name:'もろば牙の輪',     cat:'charm', emoji:'🔔', minF:14, effects:[ { on:'passive', do:'statAdd', stat:'atk', power:7 }, { on:'passive', do:'statAdd', stat:'def', power:-4 } ] },
     // --- 武器（ツメ）：14段階・出現階バンド（深い階ほど強い段階だけが落ちる）---
     tsume1:      { name:'木の枝のツメ',        cat:'weapon', emoji:'🪵', atk:2,  minF:1,  maxF:6             },
     tsume2:      { name:'きばのツメ',          cat:'weapon', emoji:'🦷', atk:4,  minF:3,  maxF:10            },
@@ -1901,6 +1906,7 @@ const Core = {
         inv: startInv,
         weapon: null,
         shield: null,
+        accessory: null, // 飾り（常時効果の装備・F5）
         facing: { dx: 0, dy: 1 },
         sleep: 0,
         buffs: [], // 一時バフ（野草など）: {stat:'atk'|'def', power, turns}
@@ -2049,9 +2055,10 @@ const Core = {
   _playerAtk(run) {
     const p = run.player;
     let atk = p.atkBase + (p.weapon ? (DATA.ITEMS[p.weapon.kind].atk || 0) : 0);
-    // 装備の常時攻撃修飾（FPのツメ: HPが減るほど攻撃up＝背水）
+    // 装備の常時攻撃修飾（FPのツメ=背水／飾りの常時+攻撃 等・F5）
     for (const ef of this._gearEffects(run, 'passive')) {
       if (ef.do === 'atkOnLowHp') atk += Math.round((1 - p.hp / p.maxHp) * ef.power);
+      else if (ef.do === 'statAdd' && ef.stat === 'atk') atk += ef.power;
     }
     // 一時バフ（ちから草など）
     if (p.buffs) for (const b of p.buffs) if (b.stat === 'atk') atk += b.power;
@@ -2080,8 +2087,12 @@ const Core = {
   _playerDef(run) {
     const p = run.player;
     let def = p.defBase + (p.shield ? (DATA.ITEMS[p.shield.kind].def || 0) : 0);
+    // 飾りの常時+防御（もろば牙輪のような-防御もあり得る）・F5
+    for (const ef of this._gearEffects(run, 'passive')) {
+      if (ef.do === 'statAdd' && ef.stat === 'def') def += ef.power;
+    }
     if (p.buffs) for (const b of p.buffs) if (b.stat === 'def') def += b.power;
-    return def;
+    return Math.max(0, def);
   },
 
   /**
@@ -2093,7 +2104,7 @@ const Core = {
    */
   _gearEffects(run, hook) {
     const out = [];
-    for (const slot of ['weapon', 'shield']) {
+    for (const slot of ['weapon', 'shield', 'accessory']) {
       const it = run.player[slot];
       if (!it) continue;
       const d = DATA.ITEMS[it.kind];
@@ -2219,7 +2230,7 @@ const Core = {
       case 'unequip': {
         // 装備を外す（slot: 'weapon'|'shield'）。1ターン消費（§8.4の付け替えに準じる）
         const slot = action.slot;
-        if (slot !== 'weapon' && slot !== 'shield') return { events, turnSpent: false };
+        if (slot !== 'weapon' && slot !== 'shield' && slot !== 'accessory') return { events, turnSpent: false };
         if (!p[slot]) return { events, turnSpent: false };
         const nm = DATA.ITEMS[p[slot].kind].name;
         p[slot] = null;
@@ -2278,6 +2289,11 @@ const Core = {
           // 盾装備: invに残したまま player.shield に参照を設定
           p.shield = p.inv[action.idx];
           msg(iname + 'を装備した');
+          turnSpent = true;
+        } else if (ITEM.cat === 'charm') {
+          // 飾り装備（常時効果・F5）: accessoryスロットに参照を設定
+          p.accessory = p.inv[action.idx];
+          msg(iname + 'を身につけた');
           turnSpent = true;
         } else if (ITEM.cat === 'herb') {
           // 野草を飲む（drink効果: 一時バフ／状態回復／最大HP上昇・F3）
@@ -2592,8 +2608,9 @@ const Core = {
       msg('熊はたおれた…');
       return;
     }
-    // ねむりヘビ：命中時に確率で眠り（きよめ草の眠り除けが効いていると無効・F3）
-    const sleepGuard = p.buffs && p.buffs.some(b => b.stat === 'sleepGuard');
+    // ねむりヘビ：命中時に確率で眠り（きよめ草の一時バフ or ねむけよけの鈴の常時効果で無効）
+    const sleepGuard = (p.buffs && p.buffs.some(b => b.stat === 'sleepGuard'))
+      || this._gearEffects(run, 'passive').some(ef => ef.do === 'sleepGuard');
     if (def.ai === 'sleep' && !sleepGuard && Math.random() < CONFIG.SLEEP_CHANCE) {
       p.sleep = CONFIG.SLEEP_TURNS;
       msg('熊はねむってしまった！');
@@ -3599,6 +3616,14 @@ const Menu = (() => {
         return '装備で攻撃+' + it.atk + (it.effects ? '＋特殊効果' : '');
       case 'shield':
         return '装備で防御+' + it.def + (it.effects ? '＋特殊効果' : '');
+      case 'charm': {
+        const parts = [];
+        for (const ef of (it.effects || [])) {
+          if (ef.do === 'statAdd') parts.push((ef.stat === 'atk' ? 'こうげき' : 'まもり') + (ef.power >= 0 ? '+' : '') + ef.power);
+          else if (ef.do === 'sleepGuard') parts.push('眠らされない');
+        }
+        return '常時:' + parts.join('・');
+      }
       case 'wand': {
         const ef = (it.effects || [])[0] || {};
         const eff = ef.do === 'push' ? '正面の敵をふきとばす'
@@ -3681,9 +3706,9 @@ const Menu = (() => {
     head.textContent = '持ち物 ' + inv.length + '/' + CONFIG.INV_MAX;
     ul.appendChild(head);
 
-    // 一覧（装備中＝weapon/shield参照は除外）
+    // 一覧（装備中＝weapon/shield/accessory参照は除外）
     const rows = inv.map((item, idx) => ({ item, idx }))
-                    .filter(({ item }) => item !== p.weapon && item !== p.shield);
+                    .filter(({ item }) => item !== p.weapon && item !== p.shield && item !== p.accessory);
 
     if (rows.length === 0) {
       const li = document.createElement('li');
@@ -3714,7 +3739,7 @@ const Menu = (() => {
 
       // カテゴリ別の動詞ボタン（野草は「飲む」「投げる」の2つ・F3）
       const verbBtns = [];
-      if (ITEM.cat === 'weapon' || ITEM.cat === 'shield') {
+      if (ITEM.cat === 'weapon' || ITEM.cat === 'shield' || ITEM.cat === 'charm') {
         verbBtns.push(['装備', () => actKeepOpen({ type: 'use', idx })]); // 装備してメニューは閉じない（C8）
       } else if (ITEM.cat === 'throw') {
         verbBtns.push(['投げる', () => { UI.closeModal('menuModal'); Game.playerAction({ type: 'use', idx }); }]); // needDir→方向選択
@@ -3768,8 +3793,9 @@ const Menu = (() => {
 
     const p = G.run.player;
     const slots = [
-      { slot: 'weapon', label: '武器', cat: 'weapon' },
-      { slot: 'shield', label: '盾',   cat: 'shield' },
+      { slot: 'weapon',    label: '武器', cat: 'weapon' },
+      { slot: 'shield',    label: '盾',   cat: 'shield' },
+      { slot: 'accessory', label: '飾り', cat: 'charm'  },
     ];
 
     for (const s of slots) {
@@ -3782,7 +3808,7 @@ const Menu = (() => {
       lbl.className = 'menu-item-label';
       if (equipped) {
         const d = DATA.ITEMS[equipped.kind];
-        const val = s.cat === 'weapon' ? '攻+' + d.atk : '防+' + d.def;
+        const val = s.cat === 'weapon' ? '攻+' + d.atk : s.cat === 'shield' ? '防+' + d.def : '常時効果';
         lbl.textContent = s.label + '：' + d.emoji + ' ' + d.name + '（' + val + '）';
       } else {
         lbl.textContent = s.label + '：なし';
@@ -3829,7 +3855,7 @@ const Menu = (() => {
             ch.className = 'menu-item-row menu-choice-row';
             const chLbl = document.createElement('span');
             chLbl.className = 'menu-item-label';
-            const val = s.cat === 'weapon' ? '攻+' + d.atk : '防+' + d.def;
+            const val = s.cat === 'weapon' ? '攻+' + d.atk : s.cat === 'shield' ? '防+' + d.def : '常時効果';
             chLbl.textContent = '┗ ' + d.emoji + ' ' + d.name + '（' + val + '）';
             ch.appendChild(chLbl);
             const chBtn = document.createElement('button');
