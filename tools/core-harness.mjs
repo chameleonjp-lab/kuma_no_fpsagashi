@@ -411,7 +411,7 @@ group('items', () => {
   const pr = Core.act(r, { type: 'place', idx: pi });
   ok(r.items.length === itemsBefore + 1 && r.player.inv.length === 0, '置く: 足元に出現・inv減');
 
-  // 投擲: 直線上の敵に matsubokkuri 10ダメージ・item消費
+  // 投擲: 直線上の敵に matsubokkuri ダメージ（攻撃連動・D2）・item消費
   r = mk();
   // プレイヤーを内側の安全位置へ固定（端スポーンで右方向が盤外になる揺れを防ぐ）
   r.player.x = 5; r.player.y = 5; r.player.facing = { dx: 1, dy: 0 };
@@ -419,8 +419,10 @@ group('items', () => {
   for (let k = 1; k <= 4; k++) r.map.tiles[py][px + k] = 1;
   r.enemies = [{ x: px + 2, y: py, kind: 'hachi', hp: 20, maxHp: 20, atk: 2, def: 0, exp: 2, stun: 0, cool: 0 }];
   const ti = findUse(r, 'matsubokkuri');
+  // D2: 投擲ダメージはプレイヤー攻撃に連動（base + 攻撃×scale）。期待値はCOREから算出
+  const matsuDmg = DATA.ITEMS.matsubokkuri.dmg + Math.round(Core._playerAtk(r) * (DATA.ITEMS.matsubokkuri.scale || 0));
   Core.act(r, { type: 'throw', idx: ti, dir: { dx: 1, dy: 0 } });
-  ok(r.enemies.length === 1 && r.enemies[0].hp === 10, '松ぼっくり 直線で10ダメージ');
+  ok(r.enemies.length === 1 && r.enemies[0].hp === 20 - matsuDmg, `松ぼっくり 直線で${matsuDmg}ダメージ(攻撃連動)`);
   ok(r.player.inv.length === 0, '松ぼっくり 投擲で消費');
 
   // 投擲: しびれ茸で麻痺。隣接敵に投げても投擲ターンに反撃されず（即時麻痺）、麻痺が継続する

@@ -449,27 +449,27 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 8px 10px;
   padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   background: var(--clr-surface);
   border-top: 3px solid var(--clr-border);
   flex-shrink: 0;
 }
 
-/* 8方向パッド */
+/* 8方向パッド（A4: 56→64pxで押しやすく） */
 #dpad {
   display: grid;
-  grid-template-columns: repeat(3, 56px);
-  grid-template-rows: repeat(3, 56px);
+  grid-template-columns: repeat(3, 64px);
+  grid-template-rows: repeat(3, 64px);
   gap: 3px;
   flex-shrink: 0;
 }
 
 .dirBtn {
-  width: 56px;
-  height: 56px;
-  min-width: 56px;
-  min-height: 56px;
+  width: 64px;
+  height: 64px;
+  min-width: 64px;
+  min-height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -494,20 +494,23 @@ body {
 
 /* 中央セル（無効な飾り） */
 .dpad-center {
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--clr-panel);
   border: 2px solid var(--clr-border);
-  font-size: 20px;
+  font-size: 22px;
   color: var(--clr-muted);
   pointer-events: none;
 }
 
-/* 右側アクションボタン群 */
+/* 右側アクションボタン群（A4: 残り横幅をいっぱいに使って押しやすく） */
 #actionBtns {
+  flex: 1;
+  min-width: 0;
+  max-width: 220px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -515,9 +518,9 @@ body {
 }
 
 #btnAttack {
-  min-height: 76px;
-  min-width: 96px;
-  font-size: 18px;
+  width: 100%;
+  min-height: 84px;
+  font-size: 19px;
   background: var(--clr-red);
   border-color: #d05040;
   color: #ffe8e8;
@@ -528,10 +531,19 @@ body {
   background: #701810;
 }
 
+/* 足踏み・メニューは横並び（A4） */
+#actionSubRow {
+  display: flex;
+  gap: 6px;
+}
+
 #btnWait, #btnMenu {
+  flex: 1;
+  min-width: 0;
   min-height: 52px;
-  min-width: 96px;
-  font-size: 15px;
+  font-size: 14px;
+  padding-left: 4px;
+  padding-right: 4px;
 }
 
 /* ==== 結果画面 ==== */
@@ -687,6 +699,7 @@ body {
 }
 
 .modal-header {
+  position: relative;
   padding: 10px 14px;
   background: var(--clr-panel);
   border-bottom: 2px solid var(--clr-border);
@@ -695,6 +708,34 @@ body {
   color: var(--clr-gold);
   letter-spacing: 2px;
   flex-shrink: 0;
+}
+
+/* ヘッダ右端の閉じる「✕」（A1: フッターのとじる撤去の代替） */
+.menu-close {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 18px;
+  color: var(--clr-muted);
+  background: transparent;
+  border: 2px solid var(--clr-border);
+  border-radius: 6px;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.menu-close:active {
+  background: var(--clr-btn-act);
+  color: var(--clr-gold);
 }
 
 .modal-body {
@@ -768,6 +809,21 @@ body {
 
 .menu-tab:active {
   background: var(--clr-btn-act);
+}
+
+/* A1: あきらめるをタブ行の右端へ（赤・固定幅） */
+.menu-tab-giveup {
+  flex: 0 0 76px;
+  color: #ffe0d8;
+  background: var(--clr-red);
+  letter-spacing: 0;
+  font-size: 12px;
+  border-right: none;
+  border-left: 2px solid var(--clr-border);
+}
+
+.menu-tab-giveup:active {
+  background: #c24028;
 }
 
 .menu-pane {
@@ -1103,11 +1159,13 @@ body {
         <button class="dirBtn" data-dx="1"  data-dy="1">↘</button>
       </div>
 
-      <!-- 右側アクションボタン -->
+      <!-- 右側アクションボタン（上=こうげき大／下=足踏み・メニュー横並び・A4） -->
       <div id="actionBtns">
         <button id="btnAttack" class="btn">こうげき</button>
-        <button id="btnWait" class="btn">足踏み</button>
-        <button id="btnMenu" class="btn">メニュー</button>
+        <div id="actionSubRow">
+          <button id="btnWait" class="btn">足踏み</button>
+          <button id="btnMenu" class="btn">メニュー</button>
+        </div>
       </div>
     </div>
   </section>
@@ -1162,11 +1220,12 @@ body {
 <!-- ==== モーダル: メニュー ==== -->
 <div id="menuModal" class="modal-overlay" role="dialog" aria-modal="true">
   <div class="modal-box">
-    <div class="modal-header">📋 メニュー</div>
+    <div class="modal-header">📋 メニュー<button id="btnMenuClose" class="menu-close" aria-label="とじる">✕</button></div>
     <div class="menu-tabs">
       <button class="menu-tab active" data-tab="menuItems">持ち物</button>
       <button class="menu-tab" data-tab="menuEquip">装備</button>
       <button class="menu-tab" data-tab="menuStatus">状態</button>
+      <button id="btnGiveup" class="menu-tab menu-tab-giveup">あきらめる</button>
     </div>
     <div class="modal-body" style="padding:0;">
       <!-- 持ち物タブ -->
@@ -1184,10 +1243,6 @@ body {
         <ul class="menu-list">
         </ul>
       </div>
-    </div>
-    <div class="modal-footer">
-      <button id="btnGiveup" class="btn btn-danger">あきらめる</button>
-      <button id="btnMenuClose" class="btn">とじる</button>
     </div>
   </div>
 </div>
@@ -1296,6 +1351,15 @@ const CONFIG = Object.freeze({
   DEEP_RATE:      0.1,
   DEEP_BASE_FLOOR:15,
 
+  // 過剰レベル追いつき補正（v4・D1）。レベリングで「階相当(par=階+OFFSET)」より
+  // 強くなったプレイヤーには、超過レベル分だけ敵HP/攻撃を引き上げ「ワンパン/無傷」を防ぐ。
+  // par以下（未farm・適正・不足）のプレイヤーには一切かからない＝既存の難易度を保つ。
+  RB_PAR_OFFSET:    1,    // par = 階 + 1
+  RB_OVER_CAP:      6,    // 超過レベルの上限（過farmでも青天井にしない）
+  RB_HP_PER:     0.18,    // 超過1レベルあたり敵HP +18%（倍率）
+  RB_HP_FLAT:       2,    // 超過1レベルあたり敵HP +2（加算）。低HP敵もワンパンされない床を作る
+  RB_ATK_PER:     2.2,    // 超過1レベルあたり敵攻撃 +2.2（四捨五入）
+
   // レアアイテム出現（§8.4）
   RARE_ITEM_FLOOR:  8,
 
@@ -1349,10 +1413,10 @@ const DATA = Object.freeze({
     kinomi:      { name:'山の木の実',          cat:'heal',   emoji:'🌰', hp:25                               },
     ookinomi:    { name:'大きな木の実',        cat:'heal',   emoji:'🥥', hp:50, minF:12                      },
     hikaru:      { name:'ひかる木の実',        cat:'heal',   emoji:'✨', full:true, maxUp:2                   },
-    matsubokkuri:{ name:'とがった松ぼっくり',  cat:'throw',  emoji:'🌲', dmg:10                              },
+    matsubokkuri:{ name:'とがった松ぼっくり',  cat:'throw',  emoji:'🌲', dmg:10, scale:0.5               },
     shibire:     { name:'しびれ茸',            cat:'throw',  emoji:'🍄', stun:5                              },
-    korogari:    { name:'ころ石',              cat:'throw',  emoji:'🥌', dmg:5                               },
-    tsukibane:   { name:'月羽の矢',            cat:'throw',  emoji:'🏹', dmg:14, pierce:true, minF:12        },
+    korogari:    { name:'ころ石',              cat:'throw',  emoji:'🥌', dmg:5,  scale:0.3               },
+    tsukibane:   { name:'月羽の矢',            cat:'throw',  emoji:'🏹', dmg:14, pierce:true, minF:12, scale:0.6 },
     // --- 野草（飲む=自衛バフ／投げる=状態異常）・F3 ---
     chikaraGusa: { name:'ちから草',  cat:'herb', emoji:'💪', minF:3,  effects:[ { on:'drink', do:'buff', stat:'atk', power:5, dur:15 } ] },
     mamoriGusa:  { name:'まもり草',  cat:'herb', emoji:'🍀', minF:3,  effects:[ { on:'drink', do:'buff', stat:'def', power:5, dur:15 } ] },
@@ -1625,7 +1689,7 @@ const Dungeon = (() => {
   }
 
   /** 1回分の生成試行（連結保証なし。失敗時null） */
-  function tryGenerate(floorNo) {
+  function tryGenerate(floorNo, playerLv) {
     const tiles = blankTiles();
 
     // a. セクションを randInt(4,7) 個選ぶ
@@ -1684,12 +1748,13 @@ const Dungeon = (() => {
   /**
    * フロアを生成する。
    * @param {number} floorNo - 階数（1始まり）
+   * @param {number} [playerLv] - 現在のプレイヤーレベル（過剰レベル補正用・D1。省略時は補正なし）
    * @returns {{tiles,rooms,stairs,start,items,traps,enemies}}
    */
-  function generate(floorNo) {
+  function generate(floorNo, playerLv) {
     let base = null;
     for (let attempt = 0; attempt < 50; attempt++) {
-      base = tryGenerate(floorNo);
+      base = tryGenerate(floorNo, playerLv);
       if (base) break;
     }
     if (!base) throw new Error('ダンジョン生成に失敗（50回）');
@@ -1762,7 +1827,7 @@ const Dungeon = (() => {
       if (enemies.length >= enemyCount) break;
       if (enemyUsed.has(keyOf(c.x, c.y))) continue;
       if (chebyshev(c.x, c.y, start.x, start.y) < 3) continue;
-      enemies.push(Core.makeEnemy(pick(enemyKinds), floorNo, c.x, c.y));
+      enemies.push(Core.makeEnemy(pick(enemyKinds), floorNo, c.x, c.y, playerLv));
       enemyUsed.add(keyOf(c.x, c.y));
     }
 
@@ -1856,22 +1921,45 @@ const Core = {
   },
 
   /**
+   * 過剰レベル（par＝階+RB_PAR_OFFSET を超えたぶん・0〜RB_OVER_CAP）。
+   * playerLv 未指定（ヘッドレス検証や旧呼び出し）は 0 を返し、補正なし＝既存挙動。
+   * @param {number} floorNo
+   * @param {number} [playerLv]
+   * @returns {number}
+   */
+  _overLevel(floorNo, playerLv) {
+    if (!playerLv) return 0;
+    const par = floorNo + CONFIG.RB_PAR_OFFSET;
+    return Math.max(0, Math.min(CONFIG.RB_OVER_CAP, playerLv - par));
+  },
+
+  /**
    * 敵インスタンスを生成（hp/atk/def/exp に深層補正を適用、maxHp=hp）。
+   * playerLv を渡すと、過剰レベル分だけ HP/攻撃を追いつかせる（D1・par以下は不変）。
    * @param {string} kind - DATA.ENEMIES のキー
    * @param {number} floorNo
    * @param {number} x
    * @param {number} y
+   * @param {number} [playerLv] - 現在のプレイヤーレベル（省略時は補正なし）
    * @returns {object}
    */
-  makeEnemy(kind, floorNo, x, y) {
+  makeEnemy(kind, floorNo, x, y, playerLv) {
     const d = DATA.ENEMIES[kind];
     const sf = d.scaleFrom, sr = d.scaleRate; // 新規獣は専用曲線・既存はundefined（§5.2既定）
-    const hp = this.deepScale(d.hp, floorNo, sf, sr);
+    let hp  = this.deepScale(d.hp,  floorNo, sf, sr);
+    let atk = this.deepScale(d.atk, floorNo, sf, sr);
+    // 過剰レベル追いつき補正（D1）。par超過分だけ手応えを足す。
+    // HPは倍率＋加算（低HP敵もワンパンされない床を作る）・攻撃は加算。
+    const over = this._overLevel(floorNo, playerLv);
+    if (over > 0) {
+      hp  = Math.round(hp * (1 + over * CONFIG.RB_HP_PER)) + over * CONFIG.RB_HP_FLAT;
+      atk = atk + Math.round(over * CONFIG.RB_ATK_PER);
+    }
     return {
       x, y, kind,
       hp,
       maxHp: hp,
-      atk: this.deepScale(d.atk, floorNo, sf, sr),
+      atk,
       def: this.deepScale(d.def, floorNo, sf, sr),
       exp: this.deepScale(d.exp, floorNo, sf, sr),
       stun: 0,
@@ -1937,7 +2025,7 @@ const Core = {
   nextFloor(run) {
     run.floor++;
     run.deepest = Math.max(run.deepest, run.floor);
-    const d = Dungeon.generate(run.floor);
+    const d = Dungeon.generate(run.floor, run.player.lv); // 過剰レベル補正に現レベルを渡す（D1）
     run.map = { tiles: d.tiles };
     run.rooms = d.rooms;
     run.stairs = d.stairs;
@@ -2099,6 +2187,24 @@ const Core = {
     }
     if (p.buffs) for (const b of p.buffs) if (b.stat === 'def') def += b.power;
     return Math.max(0, def);
+  },
+
+  /** あるアイテム実体が現在いずれかのスロットに装備中か */
+  _isEquipped(run, item) {
+    const p = run.player;
+    return item === p.weapon || item === p.shield || item === p.accessory;
+  },
+
+  /**
+   * 持ち物の「枠を消費している数」＝非装備アイテム数（A2）。
+   * 装備中アイテムは inv に残るが枠には数えない（拾得上限・容量表示の両方で共有）。
+   * @param {object} run
+   * @returns {number}
+   */
+  _carriedCount(run) {
+    let n = 0;
+    for (const it of run.player.inv) if (!this._isEquipped(run, it)) n++;
+    return n;
   },
 
   /**
@@ -2434,11 +2540,13 @@ const Core = {
           if (target) {
             hit = true;
             if (ITEM_T.dmg) {
-              // 松ぼっくり: ダメージ（倒せば経験値・ヤマアラシ反撃なし）
-              target.hp -= ITEM_T.dmg;
+              // 松ぼっくり等: ダメージ（倒せば経験値・ヤマアラシ反撃なし）。
+              // D2: 高レベルでも腐らないよう、攻撃ダメージはプレイヤー攻撃に連動（base + 攻撃×scale）。
+              const throwDmg = ITEM_T.dmg + Math.round(this._playerAtk(run) * (ITEM_T.scale || 0));
+              target.hp -= throwDmg;
               const ename = DATA.ENEMIES[target.kind].name;
               events.push({ t: 'fx', kind: 'attack', x: cx, y: cy, enemy: target });
-              msg(inameT + 'が ' + ename + ' に当たった！ ' + ITEM_T.dmg + 'ダメージ');
+              msg(inameT + 'が ' + ename + ' に当たった！ ' + throwDmg + 'ダメージ');
               if (target.hp <= 0) {
                 msg(ename + 'をたおした');
                 msg('経験値を ' + target.exp + ' かくとく');
@@ -2495,7 +2603,8 @@ const Core = {
     if (itemIdx >= 0) {
       const it = run.items[itemIdx];
       const iname = DATA.ITEMS[it.kind].name;
-      if (p.inv.length < CONFIG.INV_MAX) {
+      // A2: 装備中アイテムは枠を消費しない（非装備数で上限判定）
+      if (this._carriedCount(run) < CONFIG.INV_MAX) {
         p.inv.push({ kind: it.kind });
         run.items.splice(itemIdx, 1);
         msg(iname + 'を拾った');
@@ -2847,7 +2956,7 @@ const Core = {
     );
     if (!kinds.length) return;
     const spot = pick(cand);
-    run.enemies.push(this.makeEnemy(pick(kinds), run.floor, spot.x, spot.y));
+    run.enemies.push(this.makeEnemy(pick(kinds), run.floor, spot.x, spot.y, run.player.lv)); // D1
   },
 
   /** 20×32 の false 2次元配列（探索済みフラグ用） */
@@ -3368,7 +3477,8 @@ const Render = (() => {
     }
 
     // --- 吹き出し（独り言。文言制御はP6・ここは描画のみ） ---
-    if (run.bubbleText) drawBubble(ctx, run.bubbleText, pcx, pcy - TILE / 2);
+    // C1: 吹き出しは熊の2タイル上（視界の邪魔を避ける）。クランプは drawBubble 側
+    if (run.bubbleText) drawBubble(ctx, run.bubbleText, pcx, pcy - TILE * 2);
   }
 
   /** その壁タイルが踏破済みの床(1/2)に8近傍で隣接していれば true */
@@ -3751,10 +3861,13 @@ const Menu = (() => {
     const p   = G.run.player;
     const inv = p.inv;
 
-    // 見出し: 所持数 N/上限（装備中を含む実所持数）
+    // 見出し: 所持数 N/上限（A2: 非装備数のみ。装備中は枠を消費しない）
+    const carried = Core._carriedCount(G.run);
+    const equippedN = inv.length - carried;
     const head = document.createElement('li');
     head.className = 'menu-cap-line';
-    head.textContent = '持ち物 ' + inv.length + '/' + CONFIG.INV_MAX;
+    head.textContent = '持ち物 ' + carried + '/' + CONFIG.INV_MAX
+                     + (equippedN > 0 ? '（装備中' + equippedN + '点は別枠）' : '');
     ul.appendChild(head);
 
     // 一覧（装備中＝weapon/shield/accessory参照は除外）
@@ -3857,13 +3970,21 @@ const Menu = (() => {
       const row = document.createElement('li');
       row.className = 'menu-item-row';
 
-      const lbl = document.createElement('span');
-      lbl.className = 'menu-item-label';
+      // A3: 装備中は名前をボタン化（タップで効果説明トグル・持ち物と同作法）
+      let lbl;
       if (equipped) {
         const d = DATA.ITEMS[equipped.kind];
         const val = s.cat === 'weapon' ? '攻+' + d.atk : s.cat === 'shield' ? '防+' + d.def : '常時効果';
+        lbl = document.createElement('button');
+        lbl.className = 'menu-item-label menu-item-name';
         lbl.textContent = s.label + '：' + d.emoji + ' ' + d.name + '（' + val + '）';
+        lbl.addEventListener('click', () => {
+          if (_effectShown.has(equipped)) _effectShown.delete(equipped); else _effectShown.add(equipped);
+          _renderEquip();
+        });
       } else {
+        lbl = document.createElement('span');
+        lbl.className = 'menu-item-label';
         lbl.textContent = s.label + '：なし';
       }
       row.appendChild(lbl);
@@ -3890,6 +4011,14 @@ const Menu = (() => {
       row.appendChild(btnOff);
 
       ul.appendChild(row);
+
+      // A3: 装備名タップで効果説明（持ち物の menu-effect-line と同作法）
+      if (equipped && _effectShown.has(equipped)) {
+        const desc = document.createElement('li');
+        desc.className = 'menu-effect-line';
+        desc.textContent = '┗ ' + itemEffectText(equipped.kind);
+        ul.appendChild(desc);
+      }
 
       // 装備選択肢（picker が開いている部位のみ）
       if (_picker === s.slot) {
@@ -3927,7 +4056,7 @@ const Menu = (() => {
 
   /**
    * 状態タブ (#menuStatus) を描画する。
-   * 階・Lv・HP・満腹度・攻撃・防御を表示。
+   * 階・Lv・経験値(B2)・HP・満腹度・攻撃/防御(総合と装備バフ分 B1)・状態/バフ欄(B3)。
    */
   function _renderStatus() {
     const pane = document.getElementById('menuStatus');
@@ -3937,13 +4066,24 @@ const Menu = (() => {
     const run = G.run;
     const p   = run.player;
 
+    // B1: 攻撃/防御は「総合（+装備バフ分）」。ボーナス＝総合−基礎
+    const atkTotal = Core._playerAtk(run);
+    const defTotal = Core._playerDef(run);
+    const fmtBonus = (n) => n === 0 ? '' : '（' + (n > 0 ? '+' : '') + n + '）';
+
+    // B2: 経験値（現在 / 次レベルまで）。Lv最大は MAX 表記
+    const xpVal = (p.lv >= CONFIG.LV_MAX)
+      ? 'MAX（Lv' + CONFIG.LV_MAX + '）'
+      : p.xp + ' / ' + Core.xpNeed(p.lv) + '（あと' + (Core.xpNeed(p.lv) - p.xp) + '）';
+
     const rows = [
       ['現在の階',   'B' + run.floor + 'F'],
       ['レベル',     'Lv ' + p.lv],
+      ['経験値',     xpVal],
       ['HP',         p.hp + ' / ' + p.maxHp],
       ['満腹度',     p.satiety + ' / ' + p.maxSatiety],
-      ['攻撃',       '' + Core._playerAtk(run)],
-      ['防御',       '' + Core._playerDef(run)],
+      ['攻撃',       atkTotal + fmtBonus(atkTotal - p.atkBase)],
+      ['防御',       defTotal + fmtBonus(defTotal - p.defBase)],
     ];
 
     for (const [label, value] of rows) {
@@ -3956,6 +4096,31 @@ const Menu = (() => {
       const valEl = document.createElement('span');
       valEl.textContent = value;
       li.appendChild(valEl);
+      ul.appendChild(li);
+    }
+
+    // B3: 状態・バフ欄
+    const head = document.createElement('li');
+    head.className = 'menu-cap-line';
+    head.textContent = '状態・バフ';
+    ul.appendChild(head);
+
+    const statusLines = [];
+    if (p.sleep > 0) statusLines.push('ねむり（残' + p.sleep + '）');
+    if (p.buffs) for (const b of p.buffs) {
+      if (b.stat === 'atk') statusLines.push('こうげき+' + b.power + '（残' + b.turns + '）');
+      else if (b.stat === 'def') statusLines.push('まもり+' + b.power + '（残' + b.turns + '）');
+      else if (b.stat === 'sleepGuard') statusLines.push('眠り除け（残' + b.turns + '）');
+    }
+    if (Core._gearEffects(run, 'passive').some(ef => ef.do === 'sleepGuard')) {
+      statusLines.push('眠り除け（装備・常時）');
+    }
+    if (statusLines.length === 0) statusLines.push('なし');
+
+    for (const s of statusLines) {
+      const li = document.createElement('li');
+      li.className = 'menu-effect-line';
+      li.textContent = '・' + s;
       ul.appendChild(li);
     }
   }
@@ -4232,10 +4397,10 @@ const UI = (() => {
     confirmCallback = null;
   });
 
-  // メニュータブ切り替え
-  document.querySelectorAll('.menu-tab').forEach(tab => {
+  // メニュータブ切り替え（あきらめるタブ data-tab無し は除外）
+  document.querySelectorAll('.menu-tab[data-tab]').forEach(tab => {
     tab.addEventListener('click', () => {
-      document.querySelectorAll('.menu-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.menu-tab[data-tab]').forEach(t => t.classList.remove('active'));
       document.querySelectorAll('.menu-pane').forEach(p => p.classList.remove('active'));
       tab.classList.add('active');
       const pane = document.getElementById(tab.dataset.tab);

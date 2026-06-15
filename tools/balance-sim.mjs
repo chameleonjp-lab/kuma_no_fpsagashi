@@ -185,24 +185,104 @@ function smartPolicy(run){
   Core.act(run,{type:'wait'});
 }
 
+// farmer : smartベースだが「各フロアの敵を狩り尽くしてから降りる」過剰レベリング型。
+//          実機の依頼者（B10でLv15）を再現し、過剰レベル補正(D1)の効きを測る。
+function farmerPolicy(run){
+  const p=run.player;
+  const adj=adjEnemies(run);
+  const hpRatio = p.hp/p.maxHp;
+
+  // 1) 回復（smartより気持ち早め）
+  const healAt = run.floor>=20 ? 0.55 : run.floor>=10 ? 0.50 : 0.40;
+  if(hpRatio < healAt){
+    let i = invFind(run, d=>d.cat==='heal');
+    if(i<0) i = invFind(run, d=>d.cat==='food'&&d.hp);
+    if(i>=0){ Core.act(run,{type:'use',idx:i}); return; }
+  }
+  // 2) 餓え対策
+  if(p.satiety<=20){ const i=invFind(run,d=>d.cat==='food'); if(i>=0){ Core.act(run,{type:'use',idx:i}); return; } }
+  // 3) 装備更新（安全時）
+  if(adj.length===0){
+    const curW = p.weapon?DATA.ITEMS[p.weapon.kind].atk:0;
+    const bw = invFind(run, d=>d.cat==='weapon'&&d.atk>curW);
+    if(bw>=0){ Core.act(run,{type:'use',idx:bw}); return; }
+    const curS = p.shield?DATA.ITEMS[p.shield.kind].def:0;
+    const bs = invFind(run, d=>d.cat==='shield'&&d.def>curS);
+    if(bs>=0){ Core.act(run,{type:'use',idx:bs}); return; }
+  }
+
+  const threat = adj.reduce((s,e)=>s+eDmg(run,e),0);
+  const bigHitter = run.enemies.find(e=> (eDmg(run,e)>=Math.max(6,p.maxHp*0.16) || hitsToKill(run,e)>=6) && cheb(e.x,e.y,p.x,p.y)<=4);
+
+  // 4) しびれ/投擲で大型を無力化（投擲は攻撃連動で強化済み・D2）
+  if(bigHitter && (threat>=p.maxHp*0.22 || hitsToKill(run,bigHitter)>=7)){
+    const shi = invFind(run, d=>d.cat==='throw'&&d.stun);
+    const mat = invFind(run, d=>d.cat==='throw'&&d.dmg);
+    const line = lineToEnemy(run, 6);
+    if(line && shi>=0 && line.e===bigHitter){ Core.act(run,{type:'throw',idx:shi,dir:line.dir}); return; }
+    if(line && mat>=0 && line.e===bigHitter){ Core.act(run,{type:'throw',idx:mat,dir:line.dir}); return; }
+  }
+  // 5) 危険なら隘路へ後退
+  if(adj.length>=2 && threat>=p.maxHp*0.25){
+    let best=null, bestScore=Infinity;
+    for(const [dx,dy] of DIRS8){
+      if(!canStep(run,p.x,p.y,dx,dy)) continue;
+      const nx=p.x+dx, ny=p.y+dy;
+      const newAdj=run.enemies.filter(e=>cheb(e.x,e.y,nx,ny)===1).length;
+      const score=newAdj*10+orthFloorCount(run,nx,ny);
+      if(score<bestScore){ bestScore=score; best={dx,dy}; }
+    }
+    if(best && bestScore < adj.length*10){ Core.act(run,{type:'move',...best}); return; }
+  }
+  // 6) 隣接攻撃
+  if(adj.length){
+    adj.sort((a,b)=> (hitsToKill(run,a)-hitsToKill(run,b)) || (eDmg(run,b)-eDmg(run,a)));
+    faceAttack(run, adj[0]); return;
+  }
+  // 7) フロアの敵を狩り尽くす（farmerの核心）。
+  if(run.enemies.length){
+    const nearest = run.enemies.reduce((m,e)=>Math.min(m,cheb(e.x,e.y,p.x,p.y)),99);
+    // HP回復待ち：敵が遠いうちは足踏みで自然回復（5歩で回復）。無理せず満タンに近づけてから削る＝過farm再現
+    if(hpRatio < 0.72 && nearest >= 4){ Core.act(run,{type:'wait'}); return; }
+    // 接近して各個撃破（極端に低HPでなければ）
+    if(hpRatio >= 0.45){
+      const toEnemy = stepToward(run, (x,y)=> run.enemies.some(e=>cheb(e.x,e.y,x,y)===0));
+      if(toEnemy){
+        const nx=p.x+toEnemy.dx, ny=p.y+toEnemy.dy;
+        const futureAdj=run.enemies.filter(e=>cheb(e.x,e.y,nx,ny)===1).length;
+        const allow = hpRatio>=0.75 ? 2 : 1; // 体力十分なら多少無理する
+        if(futureAdj<=allow){ Core.act(run,{type:'move',...toEnemy}); return; }
+      }
+    }
+  }
+  // 8) 狩り切った/安全に狩れない → 階段へ（上なら降りる）。無理な居座りはしない。
+  if(p.x===run.stairs.x && p.y===run.stairs.y){ Core.act(run,{type:'descend'}); return; }
+  const s=stairStep(run);
+  if(s){ Core.act(run,{type:'move',...s}); return; }
+  Core.act(run,{type:'wait'});
+}
+
 function playOne(policy, maxFloor){
   const run = Core.newRun('sim');
   let guard = 60000;
+  const lvAt = {}; // 各階に「到達した瞬間」のレベル（過剰レベルの可視化用）
+  let lastFloor = 0;
   while(!run.over && guard-- > 0){
+    if(run.floor !== lastFloor){ lvAt[run.floor] = run.player.lv; lastFloor = run.floor; }
     if(run.floor > maxFloor){ run.over = true; run.giveup = true; break; } // 上限到達は「勝ち抜け」
     const p=run.player;
     // 眠り中は自動でwait（降下・各個撃破の判断は policy が行う）
     if(p.sleep>0){ Core.act(run,{type:'wait'}); continue; }
     policy(run);
   }
-  return { deepest: run.deepest, reachedCap: run.floor>maxFloor, lvl: run.player.lv };
+  return { deepest: run.deepest, reachedCap: run.floor>maxFloor, lvl: run.player.lv, lvAt };
 }
 
 const RUNS = Number(process.argv[2] ?? 300);
 const MAXF = Number(process.argv[3] ?? 60);
-for(const [name, pol] of [['naive', naivePolicy], ['smart', smartPolicy]]){
-  const deaths=[]; let capClears=0; const lvls=[];
-  for(let i=0;i<RUNS;i++){ const r=playOne(pol, MAXF); deaths.push(r.deepest); lvls.push(r.lvl); if(r.reachedCap) capClears++; }
+for(const [name, pol] of [['naive', naivePolicy], ['smart', smartPolicy], ['farmer', farmerPolicy]]){
+  const deaths=[]; let capClears=0; const lvls=[]; const runsData=[];
+  for(let i=0;i<RUNS;i++){ const r=playOne(pol, MAXF); deaths.push(r.deepest); lvls.push(r.lvl); runsData.push(r); if(r.reachedCap) capClears++; }
   deaths.sort((a,b)=>a-b);
   const median=deaths[deaths.length>>1];
   const mean=(deaths.reduce((a,b)=>a+b,0)/deaths.length).toFixed(1);
@@ -210,6 +290,10 @@ for(const [name, pol] of [['naive', naivePolicy], ['smart', smartPolicy]]){
   const p10=deaths[Math.floor(deaths.length*0.1)];
   // 到達階のヒストグラム（帯別の「ここまで到達した割合」）
   const survTo = (f)=> (deaths.filter(d=>d>=f).length/deaths.length*100).toFixed(0);
+  // 指定階に到達した瞬間の平均レベル（過剰レベル＝Lv−(階+1) の可視化）
+  const lvAtF = (f)=>{ const xs=runsData.map(r=>r.lvAt[f]).filter(v=>v!=null); return xs.length? (xs.reduce((a,b)=>a+b,0)/xs.length) : null; };
+  const fmtLv = (f)=>{ const v=lvAtF(f); return v==null? `B${f}—` : `B${f}=Lv${v.toFixed(1)}(過${(v-(f+1)).toFixed(1)})`; };
   console.log(`\n[${name}] runs=${RUNS} 最深: 中央${median} 平均${mean} p10/p90=${p10}/${p90} 上限突破${(capClears/RUNS*100).toFixed(0)}% 平均Lv${(lvls.reduce((a,b)=>a+b,0)/lvls.length).toFixed(1)}`);
   console.log(`  到達率: B5 ${survTo(5)}% / B10 ${survTo(10)}% / B15 ${survTo(15)}% / B20 ${survTo(20)}% / B25 ${survTo(25)}% / B30 ${survTo(30)}% / B40 ${survTo(40)}%`);
+  console.log(`  到達時Lv: ${fmtLv(5)} / ${fmtLv(8)} / ${fmtLv(10)} / ${fmtLv(13)} / ${fmtLv(15)}`);
 }
