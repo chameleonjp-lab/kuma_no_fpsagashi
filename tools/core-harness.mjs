@@ -56,7 +56,7 @@ const group = (name, fn, need) => {
   console.log(before === fail ? '  → 合格' : '  → 不合格あり');
 };
 const args = process.argv.slice(2);
-const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'gear', 'gearfx', 'items', 'gen', 'bot'];
+const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'gear', 'gearfx', 'items', 'herb', 'gen', 'bot'];
 
 // ---------- data: 定数が仕様書（依頼書v1.1 §8）と一致 ----------
 group('data', () => {
@@ -442,6 +442,71 @@ group('items', () => {
   try { Core.act(r, { type: 'throw', idx: findUse(r, 'matsubokkuri'), dir: { dx: 1, dy: 0 } }); }
   catch (e) { threw = false; ok(false, '壁投擲で例外: ' + e.message); }
   ok(threw, '壁/空振り投擲で例外なし');
+}, [typeof Core?.act === 'function']);
+
+// ---------- herb: 野草（飲む=バフ/治療/最大HP・投げる=状態異常）・F3 ----------
+group('herb', () => {
+  const mk = () => {
+    const r = Core.newRun('herb');
+    const W = CONFIG.MAP_W, H = CONFIG.MAP_H, t = [];
+    for (let y = 0; y < H; y++) { const row = []; for (let x = 0; x < W; x++) row.push((x===0||y===0||x===W-1||y===H-1)?0:1); t.push(row); }
+    r.map.tiles = t; r.rooms = [{x:1,y:1,w:W-2,h:H-2}]; r.items=[]; r.traps=[]; r.enemies=[];
+    r.player.x = 5; r.player.y = 5; r.player.inv = []; r.player.buffs = [];
+    return r;
+  };
+  const add = (r, kind) => { r.player.inv.push({kind}); return r.player.inv.length - 1; };
+  // ちから草: 飲むと攻撃buff・ターンで切れる（飲んだターンも1消費するので残り14）
+  {
+    const r = mk(); const a0 = Core._playerAtk(r);
+    Core.act(r, {type:'use', idx: add(r, 'chikaraGusa')});
+    ok(Core._playerAtk(r) === a0 + 5, `ちから草 飲んで攻撃+5 (${a0}→${Core._playerAtk(r)})`);
+    ok(r.player.buffs.length === 1 && r.player.buffs[0].turns === 14, 'バフ残14ターン（飲んだターン消費後）');
+    for (let i = 0; i < 15; i++) Core.act(r, {type:'wait'});
+    ok(Core._playerAtk(r) === a0, 'ちから草 約15ターン後に効果が切れる');
+  }
+  // まもり草: 飲むと防御buff
+  {
+    const r = mk(); const d0 = Core._playerDef(r);
+    Core.act(r, {type:'use', idx: add(r, 'mamoriGusa')});
+    ok(Core._playerDef(r) === d0 + 5, 'まもり草 飲んで防御+5');
+  }
+  // きよめ草: 飲むと眠り除け（ねむりヘビの眠りが効かなくなる）
+  {
+    const r = mk(); r.player.hp = 500; r.player.maxHp = 500;
+    Core.act(r, {type:'use', idx: add(r, 'kiyomeGusa')});
+    ok(r.player.buffs.some(b => b.stat === 'sleepGuard'), 'きよめ草 眠り除けバフ');
+    // ねむりヘビに何度殴られても眠らない
+    r.player.x = 5; r.player.y = 5;
+    r.enemies = [{x:6,y:5,kind:'hebi',hp:99,maxHp:99,atk:4,def:0,exp:9,stun:0,confuse:0,cool:0}];
+    let slept = false;
+    // 眠り除けバフ有効中（残り19ターン）の範囲で検証。15回殴られても眠らない
+    for (let i = 0; i < 15 && !slept; i++) { Core.act(r, {type:'wait'}); if (r.player.sleep > 0) slept = true; }
+    ok(!slept, 'きよめ草中はねむりヘビで眠らない');
+  }
+  // いのち草: 飲むと最大HP+3
+  {
+    const r = mk(); const m0 = r.player.maxHp;
+    Core.act(r, {type:'use', idx: add(r, 'inochiGusa')});
+    ok(r.player.maxHp === m0 + 3, 'いのち草 最大HP+3');
+  }
+  // ねむり花: 投げると敵stun
+  {
+    const r = mk(); r.player.facing = {dx:1,dy:0};
+    r.enemies = [{x:r.player.x+2,y:r.player.y,kind:'hachi',hp:99,maxHp:99,atk:0,def:0,exp:2,stun:0,confuse:0,cool:0}];
+    Core.act(r, {type:'throw', idx: add(r,'nemuriBana'), dir:{dx:1,dy:0}});
+    ok(r.enemies[0] && r.enemies[0].stun >= 1, 'ねむり花 投げて敵をねむらせる');
+  }
+  // まよい花: 投げると敵confuse、混乱中はプレイヤーへ接近しない（ランダム徘徊）
+  {
+    const r = mk(); r.player.facing = {dx:1,dy:0};
+    r.enemies = [{x:r.player.x+2,y:r.player.y,kind:'hachi',hp:99,maxHp:99,atk:5,def:0,exp:2,stun:0,confuse:0,cool:0}];
+    Core.act(r, {type:'throw', idx: add(r,'mayoiBana'), dir:{dx:1,dy:0}});
+    ok(r.enemies[0] && r.enemies[0].confuse >= 1, 'まよい花 投げて敵をまよわせる');
+    // 混乱中はプレイヤーに隣接しても近寄り続けない（数ターンでconfuseが減る）
+    const c0 = r.enemies[0].confuse;
+    Core.act(r, {type:'wait'});
+    ok(r.enemies[0].confuse === c0 - 1, '混乱は毎ターン1減る');
+  }
 }, [typeof Core?.act === 'function']);
 
 // ---------- gen: フロア生成の健全性（連結性ほか） ----------

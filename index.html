@@ -1353,6 +1353,13 @@ const DATA = Object.freeze({
     shibire:     { name:'しびれ茸',            cat:'throw',  emoji:'🍄', stun:5                              },
     korogari:    { name:'ころ石',              cat:'throw',  emoji:'🥌', dmg:5                               },
     tsukibane:   { name:'月羽の矢',            cat:'throw',  emoji:'🏹', dmg:14, pierce:true, minF:12        },
+    // --- 野草（飲む=自衛バフ／投げる=状態異常）・F3 ---
+    chikaraGusa: { name:'ちから草',  cat:'herb', emoji:'💪', minF:3,  effects:[ { on:'drink', do:'buff', stat:'atk', power:5, dur:15 } ] },
+    mamoriGusa:  { name:'まもり草',  cat:'herb', emoji:'🍀', minF:3,  effects:[ { on:'drink', do:'buff', stat:'def', power:5, dur:15 } ] },
+    kiyomeGusa:  { name:'きよめ草',  cat:'herb', emoji:'🌿', minF:1,  effects:[ { on:'drink', do:'buff', stat:'sleepGuard', power:1, dur:20 } ] },
+    inochiGusa:  { name:'いのち草',  cat:'herb', emoji:'💚', minF:6,  effects:[ { on:'drink', do:'maxhp', power:3 } ] },
+    nemuriBana:  { name:'ねむり花',  cat:'herb', emoji:'😴', minF:5,  effects:[ { on:'throw', do:'status', status:'stun', power:4 } ] },
+    mayoiBana:   { name:'まよい花',  cat:'herb', emoji:'🎭', minF:8,  effects:[ { on:'throw', do:'status', status:'confuse', power:5 } ] },
     // --- 武器（ツメ）：14段階・出現階バンド（深い階ほど強い段階だけが落ちる）---
     tsume1:      { name:'木の枝のツメ',        cat:'weapon', emoji:'🪵', atk:2,  minF:1,  maxF:6             },
     tsume2:      { name:'きばのツメ',          cat:'weapon', emoji:'🦷', atk:4,  minF:3,  maxF:10            },
@@ -1852,6 +1859,7 @@ const Core = {
       def: this.deepScale(d.def, floorNo, sf, sr),
       exp: this.deepScale(d.exp, floorNo, sf, sr),
       stun: 0,
+      confuse: 0,
       cool: 0,
     };
   },
@@ -1890,6 +1898,7 @@ const Core = {
         shield: null,
         facing: { dx: 0, dy: 1 },
         sleep: 0,
+        buffs: [], // 一時バフ（野草など）: {stat:'atk'|'def', power, turns}
       },
       map: { tiles: d.tiles },
       rooms: d.rooms,
@@ -2031,7 +2040,7 @@ const Core = {
     return msgs;
   },
 
-  /** プレイヤーの総攻撃力（基礎＋武器補正＋常時修飾） */
+  /** プレイヤーの総攻撃力（基礎＋武器補正＋常時修飾＋一時バフ） */
   _playerAtk(run) {
     const p = run.player;
     let atk = p.atkBase + (p.weapon ? (DATA.ITEMS[p.weapon.kind].atk || 0) : 0);
@@ -2039,7 +2048,9 @@ const Core = {
     for (const ef of this._gearEffects(run, 'passive')) {
       if (ef.do === 'atkOnLowHp') atk += Math.round((1 - p.hp / p.maxHp) * ef.power);
     }
-    return atk;
+    // 一時バフ（ちから草など）
+    if (p.buffs) for (const b of p.buffs) if (b.stat === 'atk') atk += b.power;
+    return Math.max(1, atk);
   },
 
   /**
@@ -2060,10 +2071,12 @@ const Core = {
     return true;
   },
 
-  /** プレイヤーの総防御力（基礎＋盾補正） */
+  /** プレイヤーの総防御力（基礎＋盾補正＋一時バフ） */
   _playerDef(run) {
     const p = run.player;
-    return p.defBase + (p.shield ? (DATA.ITEMS[p.shield.kind].def || 0) : 0);
+    let def = p.defBase + (p.shield ? (DATA.ITEMS[p.shield.kind].def || 0) : 0);
+    if (p.buffs) for (const b of p.buffs) if (b.stat === 'def') def += b.power;
+    return def;
   },
 
   /**
@@ -2261,6 +2274,23 @@ const Core = {
           p.shield = p.inv[action.idx];
           msg(iname + 'を装備した');
           turnSpent = true;
+        } else if (ITEM.cat === 'herb') {
+          // 野草を飲む（drink効果: 一時バフ／状態回復／最大HP上昇・F3）
+          for (const ef of (ITEM.effects || [])) {
+            if (ef.on !== 'drink') continue;
+            if (ef.do === 'buff') {
+              if (!p.buffs) p.buffs = [];
+              p.buffs.push({ stat: ef.stat, power: ef.power, turns: ef.dur });
+              const lbl = ef.stat === 'atk' ? 'こうげきが上がった' : ef.stat === 'def' ? 'まもりが上がった' : '体が清められた（しばらく眠らない）';
+              msg(iname + 'を飲んだ。' + lbl + '！');
+            } else if (ef.do === 'maxhp') {
+              p.maxHp += ef.power;
+              p.hp = Math.min(p.maxHp, p.hp + ef.power);
+              msg(iname + 'を飲んだ。最大HPが上がった！');
+            }
+          }
+          p.inv.splice(action.idx, 1);
+          turnSpent = true;
         } else if (ITEM.cat === 'throw') {
           // 投擲アイテム: Core側ではターン消費せず、DOM側に方向選択を委ねる
           events.push({ t: 'needDir', idx: action.idx });
@@ -2331,6 +2361,14 @@ const Core = {
               target.stun = ITEM_T.stun;
               const ename = DATA.ENEMIES[target.kind].name;
               msg(ename + 'はしびれている！');
+            } else {
+              // 野草など on:'throw' の状態異常付与（ねむり花=stun / まよい花=confuse・F3）
+              const ename = DATA.ENEMIES[target.kind].name;
+              for (const ef of (ITEM_T.effects || [])) {
+                if (ef.on !== 'throw' || ef.do !== 'status') continue;
+                if (ef.status === 'stun') { target.stun = Math.max(target.stun, ef.power); msg(ename + 'はねむってしまった！'); }
+                else if (ef.status === 'confuse') { target.confuse = Math.max(target.confuse || 0, ef.power); msg(ename + 'は まよっている！'); }
+              }
             }
             // 貫通(月羽の矢など)は敵を抜けて直線上の次へ。それ以外は最初の敵で停止
             if (!ITEM_T.pierce) break;
@@ -2449,8 +2487,10 @@ const Core = {
     for (const e of list) {
       if (run.over) return;
       if (run.enemies.indexOf(e) < 0) continue; // 既に除去済みは無視
-      // しびれ（stun）優先
+      // しびれ（stun）優先＝行動不能
       if (e.stun > 0) { e.stun--; continue; }
+      // 混乱（confuse）＝接近せずランダムに徘徊（まよい花・F3）
+      if (e.confuse > 0) { e.confuse--; this._wander(run, e); continue; }
 
       const def = DATA.ENEMIES[e.kind];
       const dist = chebyshev(e.x, e.y, p.x, p.y);
@@ -2518,8 +2558,9 @@ const Core = {
       msg('熊はたおれた…');
       return;
     }
-    // ねむりヘビ：命中時に確率で眠り
-    if (def.ai === 'sleep' && Math.random() < CONFIG.SLEEP_CHANCE) {
+    // ねむりヘビ：命中時に確率で眠り（きよめ草の眠り除けが効いていると無効・F3）
+    const sleepGuard = p.buffs && p.buffs.some(b => b.stat === 'sleepGuard');
+    if (def.ai === 'sleep' && !sleepGuard && Math.random() < CONFIG.SLEEP_CHANCE) {
       p.sleep = CONFIG.SLEEP_TURNS;
       msg('熊はねむってしまった！');
     }
@@ -2654,6 +2695,18 @@ const Core = {
     // 自然回復（満腹度1以上・REGEN周期・HP<最大）
     if (p.satiety >= 1 && run.turn % CONFIG.REGEN_EVERY_TURNS === 0 && p.hp < p.maxHp) {
       p.hp += 1;
+    }
+
+    // 一時バフの減衰（ちから草など・F3）
+    if (p.buffs && p.buffs.length) {
+      for (const b of p.buffs) b.turns--;
+      const expired = p.buffs.filter(b => b.turns <= 0);
+      p.buffs = p.buffs.filter(b => b.turns > 0);
+      for (const b of expired) {
+        if (b.stat === 'atk') msg('こうげきの効果が切れた');
+        else if (b.stat === 'def') msg('まもりの効果が切れた');
+        else if (b.stat === 'sleepGuard') msg('眠り除けの効果が切れた');
+      }
     }
   },
 
@@ -3493,12 +3546,27 @@ const Menu = (() => {
       case 'heal':
         return it.full ? 'HPを全回復（満タンなら最大HP+' + it.maxUp + '）' : 'HP+' + it.hp;
       case 'throw':
-        return it.dmg ? '投げて当たった敵に' + it.dmg + 'ダメージ'
+        return it.dmg ? ('投げて当たった敵に' + it.dmg + 'ダメージ' + (it.pierce ? '（貫通）' : ''))
                       : '投げて当たった敵を' + it.stun + 'ターンしびれさせる';
       case 'weapon':
-        return '装備で攻撃+' + it.atk;
+        return '装備で攻撃+' + it.atk + (it.effects ? '＋特殊効果' : '');
       case 'shield':
-        return '装備で防御+' + it.def;
+        return '装備で防御+' + it.def + (it.effects ? '＋特殊効果' : '');
+      case 'herb': {
+        // 飲む効果／投げる効果を説明
+        const parts = [];
+        for (const ef of (it.effects || [])) {
+          if (ef.on === 'drink') {
+            if (ef.do === 'buff' && ef.stat === 'sleepGuard') parts.push('飲む:しばらく眠らされない(' + ef.dur + 'ターン)');
+            else if (ef.do === 'buff') parts.push('飲む:' + (ef.stat === 'atk' ? 'こうげき' : 'まもり') + '+' + ef.power + '(' + ef.dur + 'ターン)');
+            else if (ef.do === 'maxhp') parts.push('飲む:最大HP+' + ef.power);
+          } else if (ef.on === 'throw') {
+            if (ef.status === 'stun') parts.push('投げ:敵を' + ef.power + 'ターンねむらせる');
+            else if (ef.status === 'confuse') parts.push('投げ:敵を' + ef.power + 'ターンまよわせる');
+          }
+        }
+        return parts.join(' / ');
+      }
       default:
         return '';
     }
@@ -3588,28 +3656,25 @@ const Menu = (() => {
       });
       li.appendChild(label);
 
-      // カテゴリ別の主ボタン
-      const mainBtn = document.createElement('button');
-      mainBtn.className = 'menu-item-btn';
+      // カテゴリ別の動詞ボタン（野草は「飲む」「投げる」の2つ・F3）
+      const verbBtns = [];
       if (ITEM.cat === 'weapon' || ITEM.cat === 'shield') {
-        mainBtn.textContent = '装備';                      // C2
-        mainBtn.addEventListener('click', () => {
-          actKeepOpen({ type: 'use', idx });               // 装備してメニューは閉じない（C8）
-        });
+        verbBtns.push(['装備', () => actKeepOpen({ type: 'use', idx })]); // 装備してメニューは閉じない（C8）
       } else if (ITEM.cat === 'throw') {
-        mainBtn.textContent = '投げる';
-        mainBtn.addEventListener('click', () => {
-          UI.closeModal('menuModal');
-          Game.playerAction({ type: 'use', idx });         // needDir→方向選択
-        });
+        verbBtns.push(['投げる', () => { UI.closeModal('menuModal'); Game.playerAction({ type: 'use', idx }); }]); // needDir→方向選択
+      } else if (ITEM.cat === 'herb') {
+        verbBtns.push(['飲む',   () => { UI.closeModal('menuModal'); Game.playerAction({ type: 'use', idx }); }]);
+        verbBtns.push(['投げる', () => { UI.closeModal('menuModal'); Menu.openDirOverlay(idx); }]);
       } else {
-        mainBtn.textContent = '使う';
-        mainBtn.addEventListener('click', () => {
-          UI.closeModal('menuModal');
-          Game.playerAction({ type: 'use', idx });
-        });
+        verbBtns.push(['使う', () => { UI.closeModal('menuModal'); Game.playerAction({ type: 'use', idx }); }]);
       }
-      li.appendChild(mainBtn);
+      for (const [lbl, fn] of verbBtns) {
+        const b = document.createElement('button');
+        b.className = 'menu-item-btn';
+        b.textContent = lbl;
+        b.addEventListener('click', fn);
+        li.appendChild(b);
+      }
 
       // 「置く」ボタン
       const btnPlace = document.createElement('button');
