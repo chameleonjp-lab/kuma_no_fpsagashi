@@ -1333,12 +1333,12 @@ const DATA = Object.freeze({
     gorilla:    { name:'いわゴリラ',     emoji:'🦍', hp:46,  atk:14, def:7,  exp:32,  minF:15, maxF:17,       ai:'charge', scaleFrom:15, scaleRate:0.06 },
     tora:       { name:'はやてのトラ',   emoji:'🐅', hp:48,  atk:18, def:7,  exp:42,  minF:18, maxF:21,       ai:'charge', scaleFrom:18, scaleRate:0.07 },
     sai:        { name:'てつのサイ',     emoji:'🦏', hp:105, atk:31, def:13, exp:62,  minF:22, maxF:24,       ai:'boar',   scaleFrom:22, scaleRate:0.07 },
-    kaba:       { name:'のしかかりカバ', emoji:'🦛', hp:135, atk:36, def:15, exp:78,  minF:25, maxF:27,       ai:'charge', scaleFrom:25, scaleRate:0.07 },
-    zou:        { name:'おおきなゾウ',   emoji:'🐘', hp:165, atk:42, def:18, exp:94,  minF:28, maxF:29,       ai:'charge', scaleFrom:28, scaleRate:0.08 },
-    wani:       { name:'かみつきワニ',   emoji:'🐊', hp:155, atk:46, def:16, exp:104, minF:30, maxF:32,       ai:'charge', scaleFrom:30, scaleRate:0.08 },
-    mammoth:    { name:'こだいマンモス', emoji:'🦣', hp:205, atk:52, def:21, exp:120, minF:33, maxF:35,       ai:'boar',   scaleFrom:33, scaleRate:0.08 },
-    herajika:   { name:'まぼろしヘラジカ', emoji:'🫎', hp:195, atk:57, def:20, exp:136, minF:36, maxF:38,       ai:'charge', scaleFrom:36, scaleRate:0.08 },
-    dragon:     { name:'ぬしのドラゴン', emoji:'🐉', hp:235, atk:60, def:24, exp:168, minF:39, maxF:Infinity, ai:'boar',   scaleFrom:39, scaleRate:0.08 },
+    kaba:       { name:'のしかかりカバ', emoji:'🦛', hp:135, atk:36, def:15, exp:78,  minF:25, maxF:27,       ai:'charge', scaleFrom:25, scaleRate:0.07, pierceDef:3 },
+    zou:        { name:'おおきなゾウ',   emoji:'🐘', hp:165, atk:42, def:18, exp:94,  minF:28, maxF:29,       ai:'charge', scaleFrom:28, scaleRate:0.08, pierceDef:4 },
+    wani:       { name:'かみつきワニ',   emoji:'🐊', hp:155, atk:46, def:16, exp:104, minF:30, maxF:32,       ai:'charge', scaleFrom:30, scaleRate:0.08, pierceDef:4 },
+    mammoth:    { name:'こだいマンモス', emoji:'🦣', hp:205, atk:52, def:21, exp:120, minF:33, maxF:35,       ai:'boar',   scaleFrom:33, scaleRate:0.08, pierceDef:6 },
+    herajika:   { name:'まぼろしヘラジカ', emoji:'🫎', hp:195, atk:57, def:20, exp:136, minF:36, maxF:38,       ai:'charge', scaleFrom:36, scaleRate:0.08, pierceDef:7 },
+    dragon:     { name:'ぬしのドラゴン', emoji:'🐉', hp:235, atk:60, def:24, exp:168, minF:39, maxF:Infinity, ai:'boar',   scaleFrom:39, scaleRate:0.08, pierceDef:9 },
   }),
 
   // アイテムデータ（§8.4＋v2.2で装備を多段階化。武器/盾は出現階バンド[minF,maxF]で
@@ -2638,7 +2638,9 @@ const Core = {
     const msg = (text) => events.push({ t: 'msg', text });
     const p = run.player;
     const def = DATA.ENEMIES[e.kind];
-    const dmg = this.calcDamage(e.atk, this._playerDef(run));
+    // 深層獣の防御一部貫通（高防御でのゴリ押しを許さず、無力化/位置取りを促す・F7）
+    const effDef = Math.max(0, this._playerDef(run) - (def.pierceDef || 0));
+    const dmg = this.calcDamage(e.atk, effDef);
     p.hp -= dmg;
     // 🐻への被弾エフェクト（点滅）
     events.push({ t: 'fx', kind: 'bearHit' });

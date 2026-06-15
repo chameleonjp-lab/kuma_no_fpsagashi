@@ -180,6 +180,8 @@ group('beatable', () => {
     return { atk: atkBase + bestGear(floor, 'weapon', 'atk'), def: defBase + bestGear(floor, 'shield', 'def'), maxHp, lv };
   };
   const beasts = ['suigyu', 'gorilla', 'tora', 'sai', 'kaba', 'zou', 'wani', 'mammoth', 'herajika', 'dragon'];
+  // 敵1撃の被ダメ（深層獣の防御貫通 pierceDef を考慮）
+  const enemyHit = (e, d, P) => Math.max(1, e.atk - Math.max(0, P.def - (d.pierceDef || 0)));
   for (const kind of beasts) {
     const d = DATA.ENEMIES[kind];
     // 共通：有効打が入る・即死しない（intro階＋帯の深部）
@@ -190,19 +192,23 @@ group('beatable', () => {
       ok(avgDmg >= 2, `${d.name} B${f}: 有効打が入る(player.atk ${P.atk} > enemy.def ${e.def})`);
       const hits = Math.ceil(e.maxHp / Math.max(1, avgDmg));
       ok(hits <= 40, `${d.name} B${f}: ${hits}手で撃破可能(<=40)`);
-      const eDmg = Math.max(1, e.atk - P.def);
+      const eDmg = enemyHit(e, d, P);
       ok(eDmg < P.maxHp * 0.5, `${d.name} B${f}: 一撃 ${eDmg} が即死級でない(player.maxHp ${P.maxHp})`);
     }
-    // intro階のタイマン撃破可能性。B20未満は回復なし、B20以深は回復1個ぶん（最適行動）を許容。
+    // intro階のタイマン撃破可能性。
+    //  B20未満: 回復なし素殴り。
+    //  B20以深: 最適行動（しびれ/眠りで約5ターン無力化＋回復1個）を前提に許容を広げる。
     {
       const f = d.minF;
       const e = Core.makeEnemy(kind, f, 0, 0);
       const P = player(f);
       const avgDmg = Math.max(1, P.atk - e.def);
       const hits = Math.ceil(e.maxHp / avgDmg);
-      const taken = Math.max(1, e.atk - P.def) * hits;
-      const budget = f >= 20 ? P.maxHp * 1.5 : P.maxHp; // 深層は回復アイテム1個前提
-      ok(taken < budget, `${d.name} B${f}(intro): タイマン撃破可能(被ダメ計 ${taken} < 許容 ${Math.round(budget)})`);
+      const deep = f >= 20;
+      const effHits = deep ? Math.max(1, hits - 5) : hits; // 無力化で敵の手数を減らす
+      const taken = enemyHit(e, d, P) * effHits;
+      const budget = deep ? P.maxHp * 1.6 : P.maxHp;       // 回復＋戦術ぶん
+      ok(taken < budget, `${d.name} B${f}(intro): 最適行動で撃破可能(被ダメ計 ${taken} < 許容 ${Math.round(budget)})`);
     }
   }
 }, [typeof Core?.makeEnemy === 'function']);
