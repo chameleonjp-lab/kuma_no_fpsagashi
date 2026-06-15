@@ -56,7 +56,7 @@ const group = (name, fn, need) => {
   console.log(before === fail ? '  → 合格' : '  → 不合格あり');
 };
 const args = process.argv.slice(2);
-const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'gear', 'gearfx', 'items', 'herb', 'gen', 'bot'];
+const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'gear', 'gearfx', 'items', 'herb', 'wand', 'gen', 'bot'];
 
 // ---------- data: 定数が仕様書（依頼書v1.1 §8）と一致 ----------
 group('data', () => {
@@ -508,6 +508,53 @@ group('herb', () => {
     ok(r.enemies[0].confuse === c0 - 1, '混乱は毎ターン1減る');
   }
 }, [typeof Core?.act === 'function']);
+
+// ---------- wand: ふしぎ枝（回数制・正面/自分への効果）・F4 ----------
+group('wand', () => {
+  const mk = () => {
+    const r = Core.newRun('wand');
+    const W = CONFIG.MAP_W, H = CONFIG.MAP_H, t = [];
+    for (let y = 0; y < H; y++) { const row = []; for (let x = 0; x < W; x++) row.push((x===0||y===0||x===W-1||y===H-1)?0:1); t.push(row); }
+    r.map.tiles = t; r.rooms = [{x:1,y:1,w:W-2,h:H-2}]; r.items=[]; r.traps=[]; r.enemies=[];
+    r.player.x = 8; r.player.y = 8; r.player.facing = {dx:1,dy:0}; r.player.inv = [];
+    return r;
+  };
+  const add = (r, kind) => { r.player.inv.push({kind}); return r.player.inv.length - 1; };
+  const enemyAhead = (r, n=1) => { r.enemies = [{x:r.player.x+n,y:r.player.y,kind:'hachi',hp:99,maxHp:99,atk:0,def:0,exp:2,stun:0,confuse:0,cool:0}]; return r.enemies[0]; };
+  // ふっとばし枝: 正面の敵を後方へ押す・回数が減る
+  {
+    const r = mk(); const e = enemyAhead(r); const i = add(r, 'edaFutto');
+    const ex0 = e.x;
+    Core.act(r, {type:'use', idx:i});
+    ok(e.x > ex0, `ふっとばし枝 敵を後方へ (${ex0}→${e.x})`);
+    ok(r.player.inv[i].charges === DATA.ITEMS.edaFutto.charges - 1, '杖の回数が1減る');
+  }
+  // ねむらせ枝: 正面の敵をstun
+  {
+    const r = mk(); const e = enemyAhead(r);
+    Core.act(r, {type:'use', idx: add(r,'edaNemu')});
+    ok(e.stun >= 1, 'ねむらせ枝 正面の敵をねむらせる');
+  }
+  // 場所がえ枝: プレイヤーと敵の位置が入れ替わる
+  {
+    const r = mk(); const e = enemyAhead(r);
+    const px0 = r.player.x, ex0 = e.x;
+    Core.act(r, {type:'use', idx: add(r,'edaBasho')});
+    ok(r.player.x === ex0 && e.x === px0, '場所がえ枝 位置が入れ替わる');
+  }
+  // いやし枝: 自分回復（正面不要）
+  {
+    const r = mk(); r.player.hp = 10; r.player.maxHp = 100; r.enemies = [];
+    Core.act(r, {type:'use', idx: add(r,'edaIyashi')});
+    ok(r.player.hp === 35, `いやし枝 自分を25回復 (10→${r.player.hp})`);
+  }
+  // からっぽ: 回数0では発動しない
+  {
+    const r = mk(); enemyAhead(r); const i = add(r, 'edaNemu'); r.player.inv[i].charges = 0;
+    const res = Core.act(r, {type:'use', idx:i});
+    ok(res.turnSpent === false, 'からっぽの杖は不発（ターン消費なし）');
+  }
+}, [typeof Core?._pushEnemy === 'function']);
 
 // ---------- gen: フロア生成の健全性（連結性ほか） ----------
 group('gen', () => {

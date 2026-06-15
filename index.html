@@ -1360,6 +1360,11 @@ const DATA = Object.freeze({
     inochiGusa:  { name:'いのち草',  cat:'herb', emoji:'💚', minF:6,  effects:[ { on:'drink', do:'maxhp', power:3 } ] },
     nemuriBana:  { name:'ねむり花',  cat:'herb', emoji:'😴', minF:5,  effects:[ { on:'throw', do:'status', status:'stun', power:4 } ] },
     mayoiBana:   { name:'まよい花',  cat:'herb', emoji:'🎭', minF:8,  effects:[ { on:'throw', do:'status', status:'confuse', power:5 } ] },
+    // --- ふしぎ枝（回数制の杖・正面の敵 or 自分に効果）・F4。絵文字は共通マーカー🪄＋名前で区別 ---
+    edaFutto:    { name:'ふっとばし枝', cat:'wand', emoji:'🪄', charges:5, minF:8,  effects:[ { on:'zap', target:'front', do:'push',   power:3 } ] },
+    edaNemu:     { name:'ねむらせ枝',   cat:'wand', emoji:'🪄', charges:4, minF:6,  effects:[ { on:'zap', target:'front', do:'status', status:'stun', power:4 } ] },
+    edaBasho:    { name:'場所がえ枝',   cat:'wand', emoji:'🪄', charges:5, minF:10, effects:[ { on:'zap', target:'front', do:'swap' } ] },
+    edaIyashi:   { name:'いやし枝',     cat:'wand', emoji:'🪄', charges:4, minF:12, effects:[ { on:'zap', target:'self',  do:'heal',   power:25 } ] },
     // --- 武器（ツメ）：14段階・出現階バンド（深い階ほど強い段階だけが落ちる）---
     tsume1:      { name:'木の枝のツメ',        cat:'weapon', emoji:'🪵', atk:2,  minF:1,  maxF:6             },
     tsume2:      { name:'きばのツメ',          cat:'weapon', emoji:'🦷', atk:4,  minF:3,  maxF:10            },
@@ -2291,6 +2296,35 @@ const Core = {
           }
           p.inv.splice(action.idx, 1);
           turnSpent = true;
+        } else if (ITEM.cat === 'wand') {
+          // ふしぎ枝（回数制）: 正面の敵 or 自分に効果・F4
+          if (item.charges == null) item.charges = ITEM.charges;
+          if (item.charges <= 0) { msg(iname + 'は からっぽだ'); return { events, turnSpent: false }; }
+          const ef = (ITEM.effects || [])[0] || {};
+          if (ef.target === 'self') {
+            if (ef.do === 'heal') { p.hp = Math.min(p.maxHp, p.hp + ef.power); msg(iname + 'をふった。HPが回復した'); }
+            item.charges--;
+            turnSpent = true;
+          } else {
+            const f = p.facing, tx = p.x + f.dx, ty = p.y + f.dy;
+            const tgt = this._attackClear(run, p.x, p.y, f.dx, f.dy) ? this._enemyAt(run, tx, ty) : null;
+            if (!tgt) {
+              // 対象なし: 不発（回数は減らさない＝当てる前提）。ターンは消費
+              msg(iname + 'をふったが 正面に敵がいない');
+              turnSpent = true;
+            } else {
+              const ename = DATA.ENEMIES[tgt.kind].name;
+              if (ef.do === 'status' && ef.status === 'stun') { tgt.stun = Math.max(tgt.stun, ef.power); msg(ename + 'はねむった！'); }
+              else if (ef.do === 'push') { this._pushEnemy(run, tgt, f.dx, f.dy, ef.power); msg(ename + 'を ふきとばした！'); }
+              else if (ef.do === 'swap') {
+                const ox = p.x, oy = p.y; p.x = tgt.x; p.y = tgt.y; tgt.x = ox; tgt.y = oy;
+                msg(ename + 'と 場所を入れ替えた');
+                this._onLand(run, events); // 入れ替え先での拾得/罠/階段
+              }
+              item.charges--;
+              turnSpent = true;
+            }
+          }
         } else if (ITEM.cat === 'throw') {
           // 投擲アイテム: Core側ではターン消費せず、DOM側に方向選択を委ねる
           events.push({ t: 'needDir', idx: action.idx });
@@ -2600,6 +2634,19 @@ const Core = {
       if (this._canStep(run, e.x, e.y, mx, my, e)) { e.x += mx; e.y += my; return true; }
     }
     return false;
+  },
+
+  /**
+   * 敵を(dx,dy)方向へ最大dist押す（ふっとばし枝）。壁/敵/プレイヤーで停止。
+   */
+  _pushEnemy(run, e, dx, dy, dist) {
+    for (let i = 0; i < dist; i++) {
+      const nx = e.x + dx, ny = e.y + dy;
+      if (!this._isFloor(run, nx, ny)) break;
+      if (this._enemyAt(run, nx, ny)) break;
+      if (run.player.x === nx && run.player.y === ny) break;
+      e.x = nx; e.y = ny;
+    }
   },
 
   /**
@@ -3552,6 +3599,14 @@ const Menu = (() => {
         return '装備で攻撃+' + it.atk + (it.effects ? '＋特殊効果' : '');
       case 'shield':
         return '装備で防御+' + it.def + (it.effects ? '＋特殊効果' : '');
+      case 'wand': {
+        const ef = (it.effects || [])[0] || {};
+        const eff = ef.do === 'push' ? '正面の敵をふきとばす'
+                  : ef.do === 'swap' ? '正面の敵と場所を入れ替える'
+                  : ef.do === 'heal' ? '自分のHPを' + ef.power + '回復'
+                  : (ef.status === 'stun' ? '正面の敵をねむらせる' : '正面の敵に効果');
+        return 'ふる:' + eff + '（最大' + it.charges + '回）';
+      }
       case 'herb': {
         // 飲む効果／投げる効果を説明
         const parts = [];
@@ -3646,10 +3701,11 @@ const Menu = (() => {
       const li = document.createElement('li');
       li.className = 'menu-item-row';
 
-      // 絵文字＋名前（タップで効果説明トグル）
+      // 絵文字＋名前（杖は残り回数を併記。タップで効果説明トグル）
       const label = document.createElement('button');
       label.className = 'menu-item-label menu-item-name';
-      label.textContent = ITEM.emoji + ' ' + ITEM.name;
+      const charges = (ITEM.cat === 'wand') ? '（残り' + (item.charges != null ? item.charges : ITEM.charges) + '）' : '';
+      label.textContent = ITEM.emoji + ' ' + ITEM.name + charges;
       label.addEventListener('click', () => {
         if (_effectShown.has(item)) _effectShown.delete(item); else _effectShown.add(item);
         _renderItems();
@@ -3665,6 +3721,8 @@ const Menu = (() => {
       } else if (ITEM.cat === 'herb') {
         verbBtns.push(['飲む',   () => { UI.closeModal('menuModal'); Game.playerAction({ type: 'use', idx }); }]);
         verbBtns.push(['投げる', () => { UI.closeModal('menuModal'); Menu.openDirOverlay(idx); }]);
+      } else if (ITEM.cat === 'wand') {
+        verbBtns.push(['ふる', () => { UI.closeModal('menuModal'); Game.playerAction({ type: 'use', idx }); }]);
       } else {
         verbBtns.push(['使う', () => { UI.closeModal('menuModal'); Game.playerAction({ type: 'use', idx }); }]);
       }
