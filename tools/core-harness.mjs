@@ -56,7 +56,7 @@ const group = (name, fn, need) => {
   console.log(before === fail ? '  → 合格' : '  → 不合格あり');
 };
 const args = process.argv.slice(2);
-const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'gear', 'gearfx', 'items', 'herb', 'wand', 'charm', 'gen', 'bot'];
+const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'gear', 'gearfx', 'items', 'herb', 'wand', 'charm', 'scroll', 'gen', 'bot'];
 
 // ---------- data: 定数が仕様書（依頼書v1.1 §8）と一致 ----------
 group('data', () => {
@@ -599,6 +599,59 @@ group('charm', () => {
     ok(r.player.accessory === null && Core._playerAtk(r) === a0, '飾りを外すと常時効果が消える');
   }
 }, [typeof Core?._gearEffects === 'function']);
+
+// ---------- scroll: 伝え葉（読む・部屋/フロア効果）・F6 ----------
+group('scroll', () => {
+  const mk = () => {
+    const r = Core.newRun('scroll');
+    const W = CONFIG.MAP_W, H = CONFIG.MAP_H, t = [];
+    for (let y=0;y<H;y++){const row=[];for(let x=0;x<W;x++)row.push((x===0||y===0||x===W-1||y===H-1)?0:1);t.push(row);}
+    r.map.tiles = t; r.rooms = [{x:1,y:1,w:W-2,h:H-2}]; r.items=[]; r.traps=[]; r.enemies=[];
+    r.player.x = 8; r.player.y = 8; r.player.inv = [];
+    return r;
+  };
+  const add = (r, kind) => { r.player.inv.push({kind}); return r.player.inv.length - 1; };
+  // あかりの伝え葉: フロア全体が踏破済みになる
+  {
+    const r = mk();
+    Core.act(r, {type:'use', idx: add(r, 'haAkari')});
+    let allSeen = true;
+    for (let y=1;y<CONFIG.MAP_H-1;y++) for (let x=1;x<CONFIG.MAP_W-1;x++) if (!r.explored[y][x]) allSeen = false;
+    ok(allSeen, 'あかりの伝え葉 フロア全体を照らす');
+  }
+  // ねむりの伝え葉: 同部屋の敵をまとめてstun
+  {
+    const r = mk();
+    r.enemies = [
+      {x:10,y:9,kind:'hachi',hp:99,maxHp:99,atk:0,def:0,exp:2,stun:0,confuse:0,cool:0},
+      {x:12,y:12,kind:'hachi',hp:99,maxHp:99,atk:0,def:0,exp:2,stun:0,confuse:0,cool:0},
+    ];
+    Core.act(r, {type:'use', idx: add(r, 'haNemuri')});
+    ok(r.enemies.every(e => e.stun >= 1), 'ねむりの伝え葉 部屋の敵を全員ねむらせる');
+  }
+  // つむじ風の伝え葉: 隣接敵を吹き飛ばす
+  {
+    const r = mk();
+    const e = {x:r.player.x+1,y:r.player.y,kind:'hachi',hp:99,maxHp:99,atk:0,def:0,exp:2,stun:0,confuse:0,cool:0};
+    r.enemies = [e]; const ex0 = e.x;
+    Core.act(r, {type:'use', idx: add(r, 'haTsumuji')});
+    ok(e.x > ex0, 'つむじ風の伝え葉 隣接敵を吹き飛ばす');
+  }
+  // つめ上げの伝え葉: 装備中の武器を強化（+plus）
+  {
+    const r = mk(); r.player.inv.push({kind:'tsume5'}); r.player.weapon = r.player.inv[0];
+    const a0 = Core._playerAtk(r);
+    Core.act(r, {type:'use', idx: add(r, 'haTsume')});
+    ok(Core._playerAtk(r) === a0 + 2 && r.player.weapon.plus === 2, 'つめ上げの伝え葉 武器+2強化');
+  }
+  // まもり上げの伝え葉: 装備中の盾を強化
+  {
+    const r = mk(); r.player.inv.push({kind:'kegawa5'}); r.player.shield = r.player.inv[0];
+    const d0 = Core._playerDef(r);
+    Core.act(r, {type:'use', idx: add(r, 'haMamori')});
+    ok(Core._playerDef(r) === d0 + 2, 'まもり上げの伝え葉 盾+2強化');
+  }
+}, [typeof Core?.act === 'function']);
 
 // ---------- gen: フロア生成の健全性（連結性ほか） ----------
 group('gen', () => {

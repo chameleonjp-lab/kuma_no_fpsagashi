@@ -1370,6 +1370,12 @@ const DATA = Object.freeze({
     kazariMamori: { name:'まもりの腕かざり', cat:'charm', emoji:'🔔', minF:5,  effects:[ { on:'passive', do:'statAdd', stat:'def', power:3 } ] },
     kazariNemuke: { name:'ねむけよけの鈴',   cat:'charm', emoji:'🔔', minF:7,  effects:[ { on:'passive', do:'sleepGuard' } ] },
     kazariMoroha: { name:'もろば牙の輪',     cat:'charm', emoji:'🔔', minF:14, effects:[ { on:'passive', do:'statAdd', stat:'atk', power:7 }, { on:'passive', do:'statAdd', stat:'def', power:-4 } ] },
+    // --- 伝え葉（読む巻物・部屋/フロア効果）・F6。絵文字は共通マーカー📜＋名前で区別 ---
+    haAkari:     { name:'あかりの伝え葉', cat:'scroll', emoji:'📜', minF:1,  effects:[ { on:'read', do:'reveal' } ] },
+    haNemuri:    { name:'ねむりの伝え葉', cat:'scroll', emoji:'📜', minF:6,  effects:[ { on:'read', do:'roomStatus', status:'stun', power:4 } ] },
+    haTsumuji:   { name:'つむじ風の伝え葉', cat:'scroll', emoji:'📜', minF:8,  effects:[ { on:'read', do:'push', power:3 } ] },
+    haTsume:     { name:'つめ上げの伝え葉', cat:'scroll', emoji:'📜', minF:10, effects:[ { on:'read', do:'enhance', slot:'weapon', power:2 } ] },
+    haMamori:    { name:'まもり上げの伝え葉', cat:'scroll', emoji:'📜', minF:10, effects:[ { on:'read', do:'enhance', slot:'shield', power:2 } ] },
     // --- 武器（ツメ）：14段階・出現階バンド（深い階ほど強い段階だけが落ちる）---
     tsume1:      { name:'木の枝のツメ',        cat:'weapon', emoji:'🪵', atk:2,  minF:1,  maxF:6             },
     tsume2:      { name:'きばのツメ',          cat:'weapon', emoji:'🦷', atk:4,  minF:3,  maxF:10            },
@@ -2054,7 +2060,7 @@ const Core = {
   /** プレイヤーの総攻撃力（基礎＋武器補正＋常時修飾＋一時バフ） */
   _playerAtk(run) {
     const p = run.player;
-    let atk = p.atkBase + (p.weapon ? (DATA.ITEMS[p.weapon.kind].atk || 0) : 0);
+    let atk = p.atkBase + (p.weapon ? ((DATA.ITEMS[p.weapon.kind].atk || 0) + (p.weapon.plus || 0)) : 0);
     // 装備の常時攻撃修飾（FPのツメ=背水／飾りの常時+攻撃 等・F5）
     for (const ef of this._gearEffects(run, 'passive')) {
       if (ef.do === 'atkOnLowHp') atk += Math.round((1 - p.hp / p.maxHp) * ef.power);
@@ -2086,7 +2092,7 @@ const Core = {
   /** プレイヤーの総防御力（基礎＋盾補正＋一時バフ） */
   _playerDef(run) {
     const p = run.player;
-    let def = p.defBase + (p.shield ? (DATA.ITEMS[p.shield.kind].def || 0) : 0);
+    let def = p.defBase + (p.shield ? ((DATA.ITEMS[p.shield.kind].def || 0) + (p.shield.plus || 0)) : 0);
     // 飾りの常時+防御（もろば牙輪のような-防御もあり得る）・F5
     for (const ef of this._gearEffects(run, 'passive')) {
       if (ef.do === 'statAdd' && ef.stat === 'def') def += ef.power;
@@ -2294,6 +2300,41 @@ const Core = {
           // 飾り装備（常時効果・F5）: accessoryスロットに参照を設定
           p.accessory = p.inv[action.idx];
           msg(iname + 'を身につけた');
+          turnSpent = true;
+        } else if (ITEM.cat === 'scroll') {
+          // 伝え葉を読む（部屋/フロア効果・F6。地形破壊系は不採用＝連結性を壊さない）
+          for (const ef of (ITEM.effects || [])) {
+            if (ef.on !== 'read') continue;
+            if (ef.do === 'reveal') {
+              for (let y = 0; y < CONFIG.MAP_H; y++) for (let x = 0; x < CONFIG.MAP_W; x++) run.explored[y][x] = true;
+              run.stairsSeen = true;
+              msg(iname + 'を読んだ。あたりが照らされた');
+            } else if (ef.do === 'roomStatus') {
+              const room = this.roomAt(run, p.x, p.y);
+              let n = 0;
+              for (const e of run.enemies) {
+                const inRoom = room ? (e.x >= room.x && e.x < room.x + room.w && e.y >= room.y && e.y < room.y + room.h) : (chebyshev(e.x, e.y, p.x, p.y) <= 1);
+                if (!inRoom) continue;
+                if (ef.status === 'stun') e.stun = Math.max(e.stun, ef.power);
+                else if (ef.status === 'confuse') e.confuse = Math.max(e.confuse || 0, ef.power);
+                n++;
+              }
+              msg(iname + 'を読んだ。' + (n > 0 ? ('まわりの敵' + n + '体に効いた') : '効果はなかった'));
+            } else if (ef.do === 'push') {
+              let n = 0;
+              for (const e of run.enemies.slice()) {
+                if (chebyshev(e.x, e.y, p.x, p.y) !== 1) continue;
+                this._pushEnemy(run, e, Math.sign(e.x - p.x), Math.sign(e.y - p.y), ef.power);
+                n++;
+              }
+              msg(iname + 'を読んだ。' + (n > 0 ? 'つむじ風が敵を吹き飛ばした' : '効果はなかった'));
+            } else if (ef.do === 'enhance') {
+              const slotItem = ef.slot === 'weapon' ? p.weapon : p.shield;
+              if (slotItem) { slotItem.plus = (slotItem.plus || 0) + ef.power; msg(iname + 'を読んだ。' + DATA.ITEMS[slotItem.kind].name + 'が強くなった！'); }
+              else msg(iname + 'を読んだ。しかし' + (ef.slot === 'weapon' ? '武器' : '盾') + 'を装備していない');
+            }
+          }
+          p.inv.splice(action.idx, 1);
           turnSpent = true;
         } else if (ITEM.cat === 'herb') {
           // 野草を飲む（drink効果: 一時バフ／状態回復／最大HP上昇・F3）
@@ -3624,6 +3665,14 @@ const Menu = (() => {
         }
         return '常時:' + parts.join('・');
       }
+      case 'scroll': {
+        const ef = (it.effects || [])[0] || {};
+        const eff = ef.do === 'reveal' ? 'フロアの地形を照らす'
+                  : ef.do === 'push' ? 'まわりの敵を吹き飛ばす'
+                  : ef.do === 'enhance' ? (ef.slot === 'weapon' ? '武器' : '盾') + 'を+' + ef.power + '強くする'
+                  : (ef.status === 'stun' ? 'まわりの敵をねむらせる' : 'まわりの敵に効果');
+        return '読む:' + eff;
+      }
       case 'wand': {
         const ef = (it.effects || [])[0] || {};
         const eff = ef.do === 'push' ? '正面の敵をふきとばす'
@@ -3748,6 +3797,8 @@ const Menu = (() => {
         verbBtns.push(['投げる', () => { UI.closeModal('menuModal'); Menu.openDirOverlay(idx); }]);
       } else if (ITEM.cat === 'wand') {
         verbBtns.push(['ふる', () => { UI.closeModal('menuModal'); Game.playerAction({ type: 'use', idx }); }]);
+      } else if (ITEM.cat === 'scroll') {
+        verbBtns.push(['読む', () => { UI.closeModal('menuModal'); Game.playerAction({ type: 'use', idx }); }]);
       } else {
         verbBtns.push(['使う', () => { UI.closeModal('menuModal'); Game.playerAction({ type: 'use', idx }); }]);
       }
