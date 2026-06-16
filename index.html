@@ -310,7 +310,7 @@ body {
 #hud {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   height: 40px;
   min-height: 40px;
   padding: 0 8px;
@@ -322,13 +322,19 @@ body {
   overflow: hidden;
 }
 
+/* 左側の情報（階・Lv・HP・満腹）。狭ければ右端から省略（リタイアは常に見える） */
+.hud-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .hud-floor {
   color: var(--clr-gold);
   white-space: nowrap;
-}
-
-.hud-sep {
-  color: var(--clr-border);
 }
 
 .hud-lv {
@@ -340,8 +346,32 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex: 1;
+  flex-shrink: 0;
   min-width: 0;
+}
+
+/* ③ 満腹を表示していた右端にリタイアボタンを設置（メニューの あきらめる から移設） */
+.hud-retire {
+  flex-shrink: 0;
+  margin-left: auto;
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: bold;
+  color: #ffe0d8;
+  background: var(--clr-red);
+  border: 2px solid #c24028;
+  border-radius: 5px;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+}
+
+.hud-retire:active {
+  background: #c24028;
 }
 
 .hud-hp-label {
@@ -352,8 +382,8 @@ body {
 }
 
 #hudHpBar {
-  width: 64px;
-  min-width: 40px;
+  width: 48px;
+  min-width: 36px;
   height: 10px;
   background: var(--clr-hp-bg);
   border: 1px solid var(--clr-border);
@@ -456,24 +486,23 @@ body {
   flex-shrink: 0;
 }
 
-/* 8方向パッド（A4: 56→64pxで押しやすく） */
+/* 8方向パッド（上下左右は大きく・斜めは小さく＝誤タップ防止）。
+   中央列/行=66px（上下左右の主軸）、四隅列/行=50px（斜め）。 */
 #dpad {
   display: grid;
-  grid-template-columns: repeat(3, 64px);
-  grid-template-rows: repeat(3, 64px);
+  grid-template-columns: 50px 66px 50px;
+  grid-template-rows: 50px 66px 50px;
   gap: 3px;
   flex-shrink: 0;
 }
 
 .dirBtn {
-  width: 64px;
-  height: 64px;
-  min-width: 64px;
-  min-height: 64px;
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
+  font-size: 22px;
   color: var(--clr-text);
   background: var(--clr-btn);
   border: 2px solid var(--clr-border);
@@ -486,6 +515,12 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* 斜め（四隅）は一回り小さく見せる＝上下左右を主役に */
+.dirBtn.diag {
+  font-size: 18px;
+  color: var(--clr-muted);
+}
+
 .dirBtn:active {
   background: var(--clr-btn-act);
   box-shadow: 0 0 0 #000;
@@ -494,8 +529,8 @@ body {
 
 /* 中央セル（無効な飾り） */
 .dpad-center {
-  width: 64px;
-  height: 64px;
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -506,11 +541,11 @@ body {
   pointer-events: none;
 }
 
-/* 右側アクションボタン群（A4: 残り横幅をいっぱいに使って押しやすく） */
+/* 右側アクションボタン群（攻撃は控えめサイズ・残りは左のパッドへ） */
 #actionBtns {
-  flex: 1;
+  flex: 0 0 150px;
+  width: 150px;
   min-width: 0;
-  max-width: 220px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -519,8 +554,8 @@ body {
 
 #btnAttack {
   width: 100%;
-  min-height: 84px;
-  font-size: 19px;
+  min-height: 64px;
+  font-size: 18px;
   background: var(--clr-red);
   border-color: #d05040;
   color: #ffe8e8;
@@ -670,6 +705,19 @@ body {
   gap: 8px;
 }
 
+/* 結果直後の連打ガード（透明・3秒間だけ全面でタップを吸収する） */
+#tapGuard {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: transparent;
+  touch-action: none;
+}
+#tapGuard.active {
+  display: block;
+}
+
 /* ==== モーダル共通 ==== */
 .modal-overlay {
   display: none;
@@ -809,21 +857,6 @@ body {
 
 .menu-tab:active {
   background: var(--clr-btn-act);
-}
-
-/* A1: あきらめるをタブ行の右端へ（赤・固定幅） */
-.menu-tab-giveup {
-  flex: 0 0 76px;
-  color: #ffe0d8;
-  background: var(--clr-red);
-  letter-spacing: 0;
-  font-size: 12px;
-  border-right: none;
-  border-left: 2px solid var(--clr-border);
-}
-
-.menu-tab-giveup:active {
-  background: #c24028;
 }
 
 .menu-pane {
@@ -1117,17 +1150,17 @@ body {
   <section id="screenGame" class="screen">
     <!-- HUD -->
     <div id="hud">
-      <span class="hud-floor">B<span id="hudFloor">1</span>F</span>
-      <span class="hud-sep">|</span>
-      <span class="hud-lv">Lv <span id="hudLv">1</span></span>
-      <span class="hud-sep">|</span>
-      <div class="hud-hp-wrap">
-        <span class="hud-hp-label">HP</span>
-        <div id="hudHpBar"><div class="hp-fill"></div></div>
-        <span id="hudHp">15/15</span>
+      <div class="hud-left">
+        <span class="hud-floor">B<span id="hudFloor">1</span>F</span>
+        <span class="hud-lv">Lv <span id="hudLv">1</span></span>
+        <div class="hud-hp-wrap">
+          <span class="hud-hp-label">HP</span>
+          <div id="hudHpBar"><div class="hp-fill"></div></div>
+          <span id="hudHp">15/15</span>
+        </div>
+        <span class="hud-satiety">満腹 <span id="hudSatiety">100</span></span>
       </div>
-      <span class="hud-sep">|</span>
-      <span class="hud-satiety">満腹 <span id="hudSatiety">100</span></span>
+      <button id="btnRetire" class="hud-retire">リタイア</button>
     </div>
 
     <!-- キャンバス領域 -->
@@ -1145,18 +1178,18 @@ body {
     <div id="controls">
       <!-- 8方向パッド -->
       <div id="dpad">
-        <!-- 上段: 左上・上・右上 -->
-        <button class="dirBtn" data-dx="-1" data-dy="-1">↖</button>
+        <!-- 上段: 左上・上・右上（斜めは diag で一回り小さく） -->
+        <button class="dirBtn diag" data-dx="-1" data-dy="-1">↖</button>
         <button class="dirBtn" data-dx="0"  data-dy="-1">↑</button>
-        <button class="dirBtn" data-dx="1"  data-dy="-1">↗</button>
+        <button class="dirBtn diag" data-dx="1"  data-dy="-1">↗</button>
         <!-- 中段: 左・中央（飾り）・右 -->
         <button class="dirBtn" data-dx="-1" data-dy="0">←</button>
         <div class="dpad-center">🐻</div>
         <button class="dirBtn" data-dx="1"  data-dy="0">→</button>
         <!-- 下段: 左下・下・右下 -->
-        <button class="dirBtn" data-dx="-1" data-dy="1">↙</button>
+        <button class="dirBtn diag" data-dx="-1" data-dy="1">↙</button>
         <button class="dirBtn" data-dx="0"  data-dy="1">↓</button>
-        <button class="dirBtn" data-dx="1"  data-dy="1">↘</button>
+        <button class="dirBtn diag" data-dx="1"  data-dy="1">↘</button>
       </div>
 
       <!-- 右側アクションボタン（上=こうげき大／下=足踏み・メニュー横並び・A4） -->
@@ -1198,13 +1231,16 @@ body {
 
 </div><!-- /appRoot -->
 
+<!-- 結果表示直後の連打ガード（3秒間タップを遮断して結果を見られるようにする） -->
+<div id="tapGuard" aria-hidden="true"></div>
+
 <!-- ==== モーダル: ルール説明 ==== -->
 <div id="ruleModal" class="modal-overlay" role="dialog" aria-modal="true">
   <div class="modal-box">
     <div class="modal-header">📜 ルール説明</div>
     <div class="modal-body">
       <p>熊を8方向パッドで動かし、下り階段でどんどん深く潜ろう。</p>
-      <p>スコアは最深到達階（B◯F）。倒れるか「あきらめる」で終了。</p>
+      <p>スコアは最深到達階（B◯F）。倒れるか「リタイア」で終了。</p>
       <p>敵には隣接して「こうげき」。倒すと経験値、レベルアップで強くなる。</p>
       <p>アイテムは上に乗ると拾う。メニューの持ち物から使う・置く。武器と盾は装備できる。</p>
       <p>満腹度は時間で減り、0になるとHPが減っていく。食料で回復しよう。</p>
@@ -1225,7 +1261,6 @@ body {
       <button class="menu-tab active" data-tab="menuItems">持ち物</button>
       <button class="menu-tab" data-tab="menuEquip">装備</button>
       <button class="menu-tab" data-tab="menuStatus">状態</button>
-      <button id="btnGiveup" class="menu-tab menu-tab-giveup">あきらめる</button>
     </div>
     <div class="modal-body" style="padding:0;">
       <!-- 持ち物タブ -->
@@ -1340,6 +1375,10 @@ const CONFIG = Object.freeze({
   LVUP_HP:          6,
   LVUP_ATK:         1,
   LVUP_DEF_EVERY:   3,
+  // 序盤の獲得経験値ペナルティ（v4-2: 浅い階での過剰レベリングを抑える）。
+  // B1〜EARLY_XP_FLOOR では撃破経験値を EARLY_XP_PENALTY 減らす（最低1は残す）。
+  EARLY_XP_FLOOR:   5,
+  EARLY_XP_PENALTY: 2,
 
   // ターン経過処理（§8.1, §8.5）
   REGEN_EVERY_TURNS:  5,
@@ -1372,7 +1411,7 @@ const CONFIG = Object.freeze({
 
   // 状態異常（§8.3, §8.4）
   SLEEP_TURNS:      2,
-  SLEEP_CHANCE:   0.2,
+  SLEEP_CHANCE:   0.15,
   STUN_TURNS:       5,
   THROW_DMG:       10,
 
@@ -2126,6 +2165,18 @@ const Core = {
   },
 
   /**
+   * 撃破経験値の階補正（v4-2）。B1〜EARLY_XP_FLOOR は EARLY_XP_PENALTY 減算（最低1）。
+   * 表示メッセージと加算の両方で同値を使うため、撃破地点ごとに本関数を通す。
+   * @param {object} run
+   * @param {number} baseExp - 敵の素の経験値
+   * @returns {number}
+   */
+  _floorExp(run, baseExp) {
+    if (run.floor <= CONFIG.EARLY_XP_FLOOR) return Math.max(1, baseExp - CONFIG.EARLY_XP_PENALTY);
+    return baseExp;
+  },
+
+  /**
    * プレイヤーの撃破経験値を加算しレベル処理（複数レベル一括・Lv30打ち止め）。
    * @returns {string[]} 発生したレベルアップメッセージ
    */
@@ -2285,10 +2336,11 @@ const Core = {
           msg(ename + 'に ' + dmg + 'ダメージ');
           if (target.hp <= 0) {
             msg(ename + 'をたおした');
-            msg('経験値を ' + target.exp + ' かくとく');
+            const gx = this._floorExp(run, target.exp);
+            msg('経験値を ' + gx + ' かくとく');
             const idx = run.enemies.indexOf(target);
             if (idx >= 0) run.enemies.splice(idx, 1);
-            for (const m of this._gainXp(run, target.exp)) msg(m);
+            for (const m of this._gainXp(run, gx)) msg(m);
           } else {
             // 武器の命中時効果（生存している敵に適用・F1）
             for (const ef of this._gearEffects(run, 'onHit')) {
@@ -2306,10 +2358,11 @@ const Core = {
                 msg(ename + 'に追い打ち ' + ex + 'ダメージ');
                 if (target.hp <= 0) {
                   msg(ename + 'をたおした');
-                  msg('経験値を ' + target.exp + ' かくとく');
+                  const gx = this._floorExp(run, target.exp);
+                  msg('経験値を ' + gx + ' かくとく');
                   const idx = run.enemies.indexOf(target);
                   if (idx >= 0) run.enemies.splice(idx, 1);
-                  for (const m of this._gainXp(run, target.exp)) msg(m);
+                  for (const m of this._gainXp(run, gx)) msg(m);
                   break; // 敵は倒れた。残りの命中時効果は打ち切り
                 }
               }
@@ -2549,10 +2602,11 @@ const Core = {
               msg(inameT + 'が ' + ename + ' に当たった！ ' + throwDmg + 'ダメージ');
               if (target.hp <= 0) {
                 msg(ename + 'をたおした');
-                msg('経験値を ' + target.exp + ' かくとく');
+                const gx = this._floorExp(run, target.exp);
+                msg('経験値を ' + gx + ' かくとく');
                 const ti = run.enemies.indexOf(target);
                 if (ti >= 0) run.enemies.splice(ti, 1);
-                for (const m of this._gainXp(run, target.exp)) msg(m);
+                for (const m of this._gainXp(run, gx)) msg(m);
               }
             } else if (ITEM_T.stun) {
               // しびれ茸: 即座にスタンを付与。直後の敵フェーズで stun が1減り「行動不能」が始まる
@@ -2737,6 +2791,10 @@ const Core = {
       // charge / counter / sleep（移動は共通の貪欲接近）
       if (inSight) this._greedyStep(run, e, ddx, ddy);
       else this._wander(run, e);
+      // ねむりヘビは隣に来た瞬間も眠りを誘う（ワンパンで倒される前にも睡眠機会・v4-2）
+      if (def.ai === 'sleep' && Math.max(Math.abs(e.x - p.x), Math.abs(e.y - p.y)) === 1) {
+        this._trySleep(run, events);
+      }
     }
   },
 
@@ -2760,13 +2818,8 @@ const Core = {
       msg('熊はたおれた…');
       return;
     }
-    // ねむりヘビ：命中時に確率で眠り（きよめ草の一時バフ or ねむけよけの鈴の常時効果で無効）
-    const sleepGuard = (p.buffs && p.buffs.some(b => b.stat === 'sleepGuard'))
-      || this._gearEffects(run, 'passive').some(ef => ef.do === 'sleepGuard');
-    if (def.ai === 'sleep' && !sleepGuard && Math.random() < CONFIG.SLEEP_CHANCE) {
-      p.sleep = CONFIG.SLEEP_TURNS;
-      msg('熊はねむってしまった！');
-    }
+    // ねむりヘビ：命中時にも眠りを誘う（接近時の_trySleepと同じ判定）
+    if (def.ai === 'sleep') this._trySleep(run, events);
     // 盾の被弾時効果（反撃など・F1）。反撃で敵を倒したら経験値も入る
     for (const ef of this._gearEffects(run, 'onAttacked')) {
       if (ef.chance != null && Math.random() >= ef.chance) continue;
@@ -2775,12 +2828,32 @@ const Core = {
         msg('毛皮のトゲが ' + def.name + ' を刺した！');
         if (e.hp <= 0) {
           msg(def.name + 'をたおした');
-          msg('経験値を ' + e.exp + ' かくとく');
+          const gx = this._floorExp(run, e.exp);
+          msg('経験値を ' + gx + ' かくとく');
           const idx = run.enemies.indexOf(e);
           if (idx >= 0) run.enemies.splice(idx, 1);
-          for (const m of this._gainXp(run, e.exp)) msg(m);
+          for (const m of this._gainXp(run, gx)) msg(m);
         }
       }
+    }
+  },
+
+  /**
+   * ねむり誘発の判定（ねむりヘビ用）。命中時だけでなく「隣に来た瞬間」も呼ぶことで、
+   * プレイヤーがワンパンで倒せる場合でも睡眠機会が生まれる（25Fまで一度も眠らなかった対策・v4-2）。
+   * きよめ草の一時バフ／ねむけよけの鈴の常時効果で無効。既に眠っていれば何もしない。
+   * @param {object} run
+   * @param {Array} events
+   */
+  _trySleep(run, events) {
+    const p = run.player;
+    if (p.sleep > 0) return;
+    const guard = (p.buffs && p.buffs.some(b => b.stat === 'sleepGuard'))
+      || this._gearEffects(run, 'passive').some(ef => ef.do === 'sleepGuard');
+    if (guard) return;
+    if (Math.random() < CONFIG.SLEEP_CHANCE) {
+      p.sleep = CONFIG.SLEEP_TURNS;
+      events.push({ t: 'msg', text: '熊はねむってしまった！' });
     }
   },
 
@@ -3160,6 +3233,8 @@ const Game = {
     // 独り言の吹き出しを消してから結果画面へ
     run.bubbleText = '';
     UI.showScreen('result');
+    // 結果表示直後の連打が「もう一度/ホーム/実験場」を誤爆しないよう3秒だけタップ遮断
+    UI.guardTaps(3000);
     Ranking.onResultShown(run.deepest, run.name);
   },
 };
@@ -4254,6 +4329,22 @@ const UI = (() => {
   }
 
   /**
+   * 指定ミリ秒だけ全面でタップを遮断する（結果表示直後の連打誤爆を防ぐ）。
+   * @param {number} ms
+   */
+  let _tapGuardTimer = null;
+  function guardTaps(ms) {
+    const g = document.getElementById('tapGuard');
+    if (!g) return;
+    g.classList.add('active');
+    if (_tapGuardTimer) clearTimeout(_tapGuardTimer);
+    _tapGuardTimer = setTimeout(() => {
+      g.classList.remove('active');
+      _tapGuardTimer = null;
+    }, ms);
+  }
+
+  /**
    * モーダルを開く。
    * @param {string} id - モーダル要素のID
    */
@@ -4374,9 +4465,9 @@ const UI = (() => {
     closeModal('menuModal');
   });
 
-  // あきらめる（確認ダイアログ経由）
-  document.getElementById('btnGiveup').addEventListener('click', () => {
-    confirm('ほんとうにあきらめますか？', () => {
+  // リタイア（HUD右端・確認ダイアログ経由）。メニューの あきらめる から移設（②③）
+  document.getElementById('btnRetire').addEventListener('click', () => {
+    confirm('リタイアして山へ帰りますか？', () => {
       closeModal('menuModal');
       Game.playerAction({ type: 'giveup' });
     });
@@ -4420,7 +4511,7 @@ const UI = (() => {
     });
   });
 
-  return { showScreen, openModal, closeModal, confirm, doShare };
+  return { showScreen, openModal, closeModal, confirm, doShare, guardTaps };
 })();
 
 // ==== SECTION: SUPABASE ====

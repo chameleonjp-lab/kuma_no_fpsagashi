@@ -138,6 +138,12 @@ group('formulas', () => {
   // 経験値式は CONFIG の係数に追従（v2.1で 10*1.4^ → 6*1.20^ にリバランス）
   for (let n = 1; n <= 29; n++) ok(Core.xpNeed(n) === Math.ceil(CONFIG.XP_BASE * Math.pow(CONFIG.XP_MULT, n - 1)), `xpNeed(${n})`);
   ok(CONFIG.XP_MULT < 1.4, '経験値倍率を緩めた（過度な低レベル詰みの回避）');
+  // 序盤の獲得経験値ペナルティ（v4-2: B1〜5 は -2、最低1。B6以降は素通し）
+  for (let f = 1; f <= CONFIG.EARLY_XP_FLOOR; f++) {
+    ok(Core._floorExp({ floor: f }, 15) === 15 - CONFIG.EARLY_XP_PENALTY, `B${f} 経験値-${CONFIG.EARLY_XP_PENALTY}`);
+    ok(Core._floorExp({ floor: f }, 2) === 1, `B${f} 低経験値も最低1は残す`);
+  }
+  ok(Core._floorExp({ floor: CONFIG.EARLY_XP_FLOOR + 1 }, 15) === 15, `B${CONFIG.EARLY_XP_FLOOR + 1} は素通し`);
   ok(Core.deepScale(8, 15) === 8 && Core.deepScale(8, 1) === 8, 'B15以前は補正なし');
   ok(Core.deepScale(8, 16) === Math.ceil(8 * 1.1), 'B16 ×1.1');
   ok(Core.deepScale(16, 20) === Math.ceil(16 * 1.5), 'B20 ×1.5');
@@ -666,6 +672,7 @@ group('gen', () => {
   const N = Number(process.env.GEN_N ?? 2000);
   const floors = [1, 2, 3, 5, 7, 8, 10, 13, 16, 20, 30, 50];
   let count = 0;
+  let warpSeen = 0; // 検査した🌀の総数（チェックが空振りでないことの担保）
   for (let i = 0; i < N; i++) {
     const f = floors[i % floors.length];
     const d = Dungeon.generate(f);
@@ -720,13 +727,28 @@ group('gen', () => {
       ok(false, `B${f} にB8以深限定アイテム`); break;
     }
     // 罠が階段・初期位置・アイテムと重ならない／部屋床のみ
+    let trapBad = false;
     for (const t of traps) {
-      if ((t.x === stairs.x && t.y === stairs.y) || (t.x === start.x && t.y === start.y)) { ok(false, '罠が階段/初期位置に重複'); break; }
-      if (tiles[t.y][t.x] !== 1) { ok(false, '罠が部屋床以外にある'); break; }
+      if ((t.x === stairs.x && t.y === stairs.y) || (t.x === start.x && t.y === start.y)) { ok(false, '罠が階段/初期位置に重複'); trapBad = true; break; }
+      if (tiles[t.y][t.x] !== 1) { ok(false, '罠が部屋床以外にある'); trapBad = true; break; }
+      // 🌀ぐるぐる落とし穴(warp)は通路にも出入り口（避けられない場所）にも置かない（v4チェック）。
+      // 部屋床以外は上で弾いているので通路(tiles===2)には出ない。さらに通路に直接隣接する
+      // 部屋床＝出入り口（チョークポイント）にも置かないことを確認する。
+      if (DATA.TRAPS[t.kind].warp) {
+        warpSeen++;
+        let doorway = false;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = t.x + dx, ny = t.y + dy;
+          if (nx >= 0 && ny >= 0 && nx < W && ny < H && tiles[ny][nx] === 2) { doorway = true; break; }
+        }
+        if (doorway) { ok(false, `🌀が出入り口(避けられない場所)にある (floor${f} #${i})`); trapBad = true; break; }
+      }
     }
+    if (trapBad) break;
     count++;
   }
   ok(count === N, `${N}回生成して全件健全（成功 ${count}）`);
+  ok(warpSeen > 0, `🌀ぐるぐる落とし穴を ${warpSeen} 個検査（通路・出入り口に無し）`);
 }, [typeof Dungeon?.generate === 'function']);
 
 // ---------- bot: 自動プレイでクラッシュ・不変条件検査 ----------
