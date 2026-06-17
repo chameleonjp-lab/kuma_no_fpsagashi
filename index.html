@@ -478,20 +478,20 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  gap: 6px;
+  padding: 7px 8px;
+  padding-bottom: calc(7px + env(safe-area-inset-bottom, 0px));
   background: var(--clr-surface);
   border-top: 3px solid var(--clr-border);
   flex-shrink: 0;
 }
 
 /* 8方向パッド（上下左右は大きく・斜めは小さく＝誤タップ防止）。
-   中央列/行=66px（上下左右の主軸）、四隅列/行=50px（斜め）。 */
+   中央列/行=76px（上下左右の主軸・移動キー拡大v5）、四隅列/行=52px（斜め）。 */
 #dpad {
   display: grid;
-  grid-template-columns: 50px 66px 50px;
-  grid-template-rows: 50px 66px 50px;
+  grid-template-columns: 52px 76px 52px;
+  grid-template-rows: 52px 76px 52px;
   gap: 3px;
   flex-shrink: 0;
 }
@@ -541,10 +541,10 @@ body {
   pointer-events: none;
 }
 
-/* 右側アクションボタン群（攻撃は控えめサイズ・残りは左のパッドへ） */
+/* 右側アクションボタン群（攻撃は控えめサイズ・残りは左のパッドへ。移動キー拡大の横幅捻出でv5に140へ） */
 #actionBtns {
-  flex: 0 0 150px;
-  width: 150px;
+  flex: 0 0 140px;
+  width: 140px;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -1367,11 +1367,14 @@ const CONFIG = Object.freeze({
   PLAYER_DEF:       1,
   PLAYER_SATIETY: 100,
   INV_MAX:         10,
-  LV_MAX:          30,
+  LV_MAX:          42,
 
-  // 経験値・レベルアップ（§8.1）
+  // 経験値・レベルアップ（§8.1）。Lv1〜30は現行式のまま、Lv31以降は線形で緩やかに
+  // （深層オーバーホールv5: Lv上限引き上げに伴い、高レベルの指数爆発を抑えて到達可能に）。
   XP_BASE:          6,
   XP_MULT:       1.20,
+  XP_LINEAR_FROM:  30,    // この階級を超えたら線形成長へ（n>XP_LINEAR_FROM）
+  XP_LINEAR_STEP: 650,    // 線形区間の1レベルあたり必要経験値の増分
   LVUP_HP:          6,
   LVUP_ATK:         1,
   LVUP_DEF_EVERY:   3,
@@ -1456,11 +1459,13 @@ const DATA = Object.freeze({
     shibire:     { name:'しびれ茸',            cat:'throw',  emoji:'🍄', stun:5                              },
     korogari:    { name:'ころ石',              cat:'throw',  emoji:'🥌', dmg:5,  scale:0.3               },
     tsukibane:   { name:'月羽の矢',            cat:'throw',  emoji:'🏹', dmg:14, pierce:true, minF:12, scale:0.6 },
+    hoshikudaki: { name:'ほしくだきの矢',      cat:'throw',  emoji:'🌠', dmg:24, pierce:true, minF:40, scale:1.1 }, // v5: 深層の防御無視・貫通投擲
     // --- 野草（飲む=自衛バフ／投げる=状態異常）・F3 ---
     chikaraGusa: { name:'ちから草',  cat:'herb', emoji:'💪', minF:3,  effects:[ { on:'drink', do:'buff', stat:'atk', power:5, dur:15 } ] },
     mamoriGusa:  { name:'まもり草',  cat:'herb', emoji:'🍀', minF:3,  effects:[ { on:'drink', do:'buff', stat:'def', power:5, dur:15 } ] },
     kiyomeGusa:  { name:'きよめ草',  cat:'herb', emoji:'🌿', minF:1,  effects:[ { on:'drink', do:'buff', stat:'sleepGuard', power:1, dur:20 } ] },
     inochiGusa:  { name:'いのち草',  cat:'herb', emoji:'💚', minF:6,  effects:[ { on:'drink', do:'maxhp', power:3 } ] },
+    ooinochiGusa:{ name:'おおいのち草', cat:'herb', emoji:'🌱', minF:36, effects:[ { on:'drink', do:'maxhp', power:8 } ] }, // v5: 深層の最大HP育成
     nemuriBana:  { name:'ねむり花',  cat:'herb', emoji:'😴', minF:5,  effects:[ { on:'throw', do:'status', status:'stun', power:4 } ] },
     mayoiBana:   { name:'まよい花',  cat:'herb', emoji:'🎭', minF:8,  effects:[ { on:'throw', do:'status', status:'confuse', power:5 } ] },
     // --- ふしぎ枝（回数制の杖・正面の敵 or 自分に効果）・F4。絵文字は共通マーカー🪄＋名前で区別 ---
@@ -1473,12 +1478,15 @@ const DATA = Object.freeze({
     kazariMamori: { name:'まもりの腕かざり', cat:'charm', emoji:'🔔', minF:5,  effects:[ { on:'passive', do:'statAdd', stat:'def', power:3 } ] },
     kazariNemuke: { name:'ねむけよけの鈴',   cat:'charm', emoji:'🔔', minF:7,  effects:[ { on:'passive', do:'sleepGuard' } ] },
     kazariMoroha: { name:'もろば牙の輪',     cat:'charm', emoji:'🔔', minF:14, effects:[ { on:'passive', do:'statAdd', stat:'atk', power:7 }, { on:'passive', do:'statAdd', stat:'def', power:-4 } ] },
+    kazariOomamori:{ name:'まもりの大かざり', cat:'charm', emoji:'🔔', minF:36, effects:[ { on:'passive', do:'statAdd', stat:'def', power:6 } ] }, // v5: 深層の貫通対策（常時+防御）
     // --- 伝え葉（読む巻物・部屋/フロア効果）・F6。絵文字は共通マーカー📜＋名前で区別 ---
     haAkari:     { name:'あかりの伝え葉', cat:'scroll', emoji:'📜', minF:1,  effects:[ { on:'read', do:'reveal' } ] },
     haNemuri:    { name:'ねむりの伝え葉', cat:'scroll', emoji:'📜', minF:6,  effects:[ { on:'read', do:'roomStatus', status:'stun', power:4 } ] },
     haTsumuji:   { name:'つむじ風の伝え葉', cat:'scroll', emoji:'📜', minF:8,  effects:[ { on:'read', do:'push', power:3 } ] },
     haTsume:     { name:'つめ上げの伝え葉', cat:'scroll', emoji:'📜', minF:10, effects:[ { on:'read', do:'enhance', slot:'weapon', power:2 } ] },
     haMamori:    { name:'まもり上げの伝え葉', cat:'scroll', emoji:'📜', minF:10, effects:[ { on:'read', do:'enhance', slot:'shield', power:2 } ] },
+    haTsumeOo:   { name:'つよいつめ上げの伝え葉',  cat:'scroll', emoji:'📜', minF:40, effects:[ { on:'read', do:'enhance', slot:'weapon', power:5 } ] }, // v5: 深層の強化巻（武器+5）
+    haMamoriOo:  { name:'つよいまもり上げの伝え葉', cat:'scroll', emoji:'📜', minF:40, effects:[ { on:'read', do:'enhance', slot:'shield', power:5 } ] }, // v5: 深層の強化巻（盾+5）
     // --- 武器（ツメ）：14段階・出現階バンド（深い階ほど強い段階だけが落ちる）---
     tsume1:      { name:'木の枝のツメ',        cat:'weapon', emoji:'🪵', atk:2,  minF:1,  maxF:6             },
     tsume2:      { name:'きばのツメ',          cat:'weapon', emoji:'🦷', atk:4,  minF:3,  maxF:10            },
@@ -1492,8 +1500,13 @@ const DATA = Object.freeze({
     tsume10:     { name:'ぬしのツメ',          cat:'weapon', emoji:'👑', atk:21, minF:25, maxF:34            },
     tsume11:     { name:'りゅうのツメ',        cat:'weapon', emoji:'⚔️', atk:24, minF:28, maxF:37            },
     tsume12:     { name:'まおうのツメ',        cat:'weapon', emoji:'😈', atk:27, minF:31, maxF:41            },
-    tsume13:     { name:'でんせつのツメ',      cat:'weapon', emoji:'🌟', atk:31, minF:35                     },
-    tsume14:     { name:'ほしのツメ',          cat:'weapon', emoji:'💫', atk:36, minF:40                     },
+    tsume13:     { name:'でんせつのツメ',      cat:'weapon', emoji:'🌟', atk:31, minF:35, maxF:46            },
+    tsume14:     { name:'ほしのツメ',          cat:'weapon', emoji:'💫', atk:36, minF:40, maxF:52            },
+    // --- v5: 星の先の宇宙的エスカレーション（深層B43+の段階的な新ツメ）---
+    tsume15:     { name:'ながれぼしのツメ',    cat:'weapon', emoji:'☄️', atk:41, minF:43, maxF:56            },
+    tsume16:     { name:'あまのがわのツメ',    cat:'weapon', emoji:'🌌', atk:46, minF:47, maxF:60            },
+    tsume17:     { name:'そらのツメ',          cat:'weapon', emoji:'🪐', atk:51, minF:51                     },
+    tsume18:     { name:'あけぼののツメ',      cat:'weapon', emoji:'🌅', atk:56, minF:55                     },
     // --- 盾（毛皮）：14段階・出現階バンド ---
     kegawa1:     { name:'ふかふか毛皮',        cat:'shield', emoji:'🧣', def:2,  minF:1,  maxF:6             },
     kegawa2:     { name:'わたげ毛皮',          cat:'shield', emoji:'☁️', def:3,  minF:3,  maxF:10            },
@@ -1507,8 +1520,13 @@ const DATA = Object.freeze({
     kegawa10:    { name:'つきかげ毛皮',        cat:'shield', emoji:'🌑', def:19, minF:25, maxF:34            },
     kegawa11:    { name:'りゅうの毛皮',        cat:'shield', emoji:'🐲', def:22, minF:28, maxF:37            },
     kegawa12:    { name:'まおうの毛皮',        cat:'shield', emoji:'👹', def:25, minF:31, maxF:41            },
-    kegawa13:    { name:'でんせつの毛皮',      cat:'shield', emoji:'🧱', def:28, minF:35                     },
-    kegawa14:    { name:'ほしの毛皮',          cat:'shield', emoji:'💠', def:32, minF:40                     },
+    kegawa13:    { name:'でんせつの毛皮',      cat:'shield', emoji:'🧱', def:28, minF:35, maxF:46            },
+    kegawa14:    { name:'ほしの毛皮',          cat:'shield', emoji:'💠', def:32, minF:40, maxF:52            },
+    // --- v5: 星の先の段階的な新毛皮（深層B43+。武器とティア絵文字を共有）---
+    kegawa15:    { name:'ながれぼしの毛皮',    cat:'shield', emoji:'☄️', def:36, minF:43, maxF:56            },
+    kegawa16:    { name:'あまのがわの毛皮',    cat:'shield', emoji:'🌌', def:40, minF:47, maxF:60            },
+    kegawa17:    { name:'そらの毛皮',          cat:'shield', emoji:'🪐', def:44, minF:51                     },
+    kegawa18:    { name:'あけぼのの毛皮',      cat:'shield', emoji:'🌅', def:48, minF:55                     },
     // --- 効果違い装備（同帯の素装備より基礎値を下げて「火力 or 効果」のトレードを作る・F1）---
     tsumeNemuri: { name:'ねむり花のツメ',  cat:'weapon', emoji:'🌸', atk:8,  minF:9,  maxF:18,
                    effects:[ { on:'onHit', do:'status', status:'stun', dur:2, chance:0.18 } ] },
@@ -1923,11 +1941,15 @@ const Core = {
 
   /**
    * レベル n から n+1 への必要経験値（§8.1）。
+   * Lv1〜XP_LINEAR_FROM(30) は指数式、それ以降は Lv30 の値を起点に線形（v5）。
    * @param {number} n
    * @returns {number}
    */
   xpNeed(n) {
-    return Math.ceil(CONFIG.XP_BASE * Math.pow(CONFIG.XP_MULT, n - 1));
+    const f = CONFIG.XP_LINEAR_FROM;
+    if (n <= f) return Math.ceil(CONFIG.XP_BASE * Math.pow(CONFIG.XP_MULT, n - 1));
+    const anchor = Math.ceil(CONFIG.XP_BASE * Math.pow(CONFIG.XP_MULT, f - 1)); // Lv30の必要経験値=1187
+    return anchor + (n - f) * CONFIG.XP_LINEAR_STEP;
   },
 
   /**

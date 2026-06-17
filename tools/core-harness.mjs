@@ -56,7 +56,7 @@ const group = (name, fn, need) => {
   console.log(before === fail ? '  → 合格' : '  → 不合格あり');
 };
 const args = process.argv.slice(2);
-const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'gear', 'gearfx', 'items', 'herb', 'wand', 'charm', 'scroll', 'gen', 'bot'];
+const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'deepReach', 'gear', 'gearfx', 'items', 'herb', 'wand', 'charm', 'scroll', 'gen', 'bot'];
 
 // ---------- data: 定数が仕様書（依頼書v1.1 §8）と一致 ----------
 group('data', () => {
@@ -99,7 +99,7 @@ group('data', () => {
   ok(DATA.TRAPS.toge.dmg === 5 && DATA.TRAPS.kafun.satiety === 20 && DATA.TRAPS.otoshiana.warp === true, '罠3種');
   // 主人公初期値（v2.1でPLAYER_HP 15→20・回復5歩のリバランス）
   ok(CONFIG.PLAYER_HP === 20 && CONFIG.PLAYER_ATK === 3 && CONFIG.PLAYER_DEF === 1
-    && CONFIG.PLAYER_SATIETY === 100 && CONFIG.INV_MAX === 10 && CONFIG.LV_MAX === 30, '主人公初期値');
+    && CONFIG.PLAYER_SATIETY === 100 && CONFIG.INV_MAX === 10 && CONFIG.LV_MAX === 42, '主人公初期値（v5: Lv上限42）');
   ok(CONFIG.REGEN_EVERY_TURNS === 5, 'HP自然回復は5歩に1回');
   // フロア毎の敵数・湧き・上限が階で増える（B1-4は楽・深いほど圧）
   ok(typeof Core.enemyInitCount === 'function' && typeof Core.spawnInterval === 'function' && typeof Core.enemyCap === 'function', '階スケールAPIあり');
@@ -135,8 +135,13 @@ group('mono', () => {
 
 // ---------- formulas: 経験値・深層補正・ダメージ式 ----------
 group('formulas', () => {
-  // 経験値式は CONFIG の係数に追従（v2.1で 10*1.4^ → 6*1.20^ にリバランス）
-  for (let n = 1; n <= 29; n++) ok(Core.xpNeed(n) === Math.ceil(CONFIG.XP_BASE * Math.pow(CONFIG.XP_MULT, n - 1)), `xpNeed(${n})`);
+  // 経験値式は CONFIG の係数に追従（v2.1で 10*1.4^ → 6*1.20^ にリバランス）。
+  // v5: Lv1〜XP_LINEAR_FROM(30) は指数式のまま（B1〜30保護）、それ以降は線形。
+  const F = CONFIG.XP_LINEAR_FROM;
+  const anchor = Math.ceil(CONFIG.XP_BASE * Math.pow(CONFIG.XP_MULT, F - 1));
+  for (let n = 1; n <= F; n++) ok(Core.xpNeed(n) === Math.ceil(CONFIG.XP_BASE * Math.pow(CONFIG.XP_MULT, n - 1)), `xpNeed(${n}) 指数区間（不変）`);
+  for (const n of [F + 1, 35, 40, CONFIG.LV_MAX]) ok(Core.xpNeed(n) === anchor + (n - F) * CONFIG.XP_LINEAR_STEP, `xpNeed(${n}) 線形区間`);
+  ok(Core.xpNeed(F) === anchor && anchor === 1187, 'Lv30アンカー=1187で連続');
   ok(CONFIG.XP_MULT < 1.4, '経験値倍率を緩めた（過度な低レベル詰みの回避）');
   // 序盤の獲得経験値ペナルティ（v4-2: B1〜5 は -2、最低1。B6以降は素通し）
   for (let f = 1; f <= CONFIG.EARLY_XP_FLOOR; f++) {
@@ -217,6 +222,34 @@ group('beatable', () => {
       ok(taken < budget, `${d.name} B${f}(intro): 最適行動で撃破可能(被ダメ計 ${taken} < 許容 ${Math.round(budget)})`);
     }
   }
+}, [typeof Core?.makeEnemy === 'function']);
+
+// ---------- deepReach: v5 深層オーバーホールが「運＋最適でB60到達可能・平均は未到達」を満たす ----------
+group('deepReach', () => {
+  const drg = Core.makeEnemy('dragon', 60, 0, 0); // B60最深獣 HP630/atk161/def65/pierce9
+  // B60で入手可能な最良の素装備が深層級（v4トップ atk36/def32 を上回る）
+  const bestW60 = Math.max(...Object.values(DATA.ITEMS).filter(d => d.cat==='weapon' && !d.effects && (d.minF??1)<=60 && 60<=(d.maxF??Infinity)).map(d => d.atk||0));
+  const bestS60 = Math.max(...Object.values(DATA.ITEMS).filter(d => d.cat==='shield' && !d.effects && (d.minF??1)<=60 && 60<=(d.maxF??Infinity)).map(d => d.def||0));
+  ok(bestW60 >= 56 && bestS60 >= 48, `B60の最良素装備が深層級（攻${bestW60}/防${bestS60}）`);
+  ok(CONFIG.LV_MAX >= 40, `Lv上限が深層級（${CONFIG.LV_MAX}）`);
+  // LUCKYプレイヤー: Lv上限・最良素装備・幸運な強化(+18)/最大HP(+72)・攻撃飾り(+7)
+  const atk = (CONFIG.PLAYER_ATK + CONFIG.LV_MAX - 1) + bestW60 + 18 + 7;
+  const def = (CONFIG.PLAYER_DEF + Math.floor(CONFIG.LV_MAX / CONFIG.LVUP_DEF_EVERY)) + bestS60 + 18;
+  const maxHp = (CONFIG.PLAYER_HP + (CONFIG.LV_MAX - 1) * CONFIG.LVUP_HP) + 72;
+  const melee = Math.max(1, atk - drg.def);
+  const eHit  = Math.max(1, drg.atk - Math.max(0, def - 9)); // pierceDef9
+  const arrow = DATA.ITEMS.hoshikudaki;
+  const thrown = arrow.dmg + Math.round(atk * arrow.scale);  // 防御無視投擲
+  ok(thrown >= 150, `ほしくだきの矢が防御無視で大ダメージ（${thrown}）`);
+  // しびれ茸5T(無被弾)＋投擲1＋残りを近接、その間の反撃を maxHp(+回復25+保険1発)で耐える
+  const burst = thrown + CONFIG.STUN_TURNS * melee;
+  const extraHits = Math.ceil(Math.max(0, drg.hp - burst) / melee);
+  const taken = extraHits * eHit;
+  ok(taken < maxHp + 25 + eHit, `B60 LUCKY 撃破可能（バースト${burst}＋残${extraHits}手・被弾計${taken} < HP${maxHp}+回復25+保険）`);
+  // 平均プレイ（Lv32・素ほし装備・特別な道具なし）はB60で勝てない＝運ゲート維持
+  const aAtk = (CONFIG.PLAYER_ATK + 31) + 36, aDef = (CONFIG.PLAYER_DEF + Math.floor(32/3)) + 32, aHp = CONFIG.PLAYER_HP + 31 * CONFIG.LVUP_HP;
+  const aTaken = Math.ceil(drg.hp / Math.max(1, aAtk - drg.def)) * Math.max(1, drg.atk - Math.max(0, aDef - 9));
+  ok(aTaken > aHp, `B60 平均プレイは敗北＝運ゲート維持（必要被弾${aTaken} > HP${aHp}）`);
 }, [typeof Core?.makeEnemy === 'function']);
 
 // ---------- gear: 装備の多段階化と出現階バンド（v2.2「深い階ほど強い装備」） ----------
