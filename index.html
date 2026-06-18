@@ -718,6 +718,120 @@ body {
   display: block;
 }
 
+/* ==== 真エンディング演出（B60クリア時のみ） ==== */
+#endingScreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;                 /* tapGuard(500)・rotate(200) より上で全面を覆う */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding:
+    calc(env(safe-area-inset-top, 0px) + 24px)
+    16px
+    calc(env(safe-area-inset-bottom, 0px) + 24px);
+  background: #000;              /* 完全な黒でHUD・キャンバスを完全に覆う */
+  color: var(--clr-gold);
+  font-family: 'Courier New', Courier, monospace;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  opacity: 0;
+  transition: opacity 1.2s ease;
+}
+#endingScreen[hidden] { display: none; }
+#endingScreen.visible { opacity: 1; }
+
+.ending-inner {
+  width: 100%;
+  max-width: 340px;
+  margin: auto;
+  text-align: center;
+}
+
+.ending-bear {
+  font-size: 30px;
+  line-height: 1;
+  margin-bottom: 22px;
+  opacity: 0.35;
+  filter: grayscale(0.35);
+}
+
+.ending-message {
+  opacity: 0;
+  animation: endingMsgIn 2.4s ease 0.6s forwards;
+}
+
+.ending-message p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.9;
+  letter-spacing: 0.5px;
+  color: var(--clr-gold);
+  text-shadow: 0 0 12px rgba(230, 184, 0, 0.18);
+  white-space: nowrap;
+  word-break: keep-all;
+}
+
+.ending-message p.ending-gap {
+  height: 0.9em;
+  text-shadow: none;
+}
+
+@media (max-width: 359px) {
+  .ending-message p {
+    font-size: 15px;
+    white-space: normal;
+  }
+}
+
+.ending-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  display: flex;
+  justify-content: center;
+  padding: 0 16px;
+}
+
+.ending-btn {
+  width: 100%;
+  max-width: 280px;
+  min-height: 48px;
+  background: var(--clr-btn);
+  border: 3px solid var(--clr-gold);
+  color: var(--clr-gold);
+  box-shadow: 3px 3px 0 #000;
+  opacity: 0;
+  pointer-events: none;         /* 透明の間は押せない＝誤タップ防止 */
+  transition: opacity 0.9s ease;
+}
+.ending-btn:active {
+  background: var(--clr-btn-act);
+  box-shadow: 1px 1px 0 #000;
+  transform: translate(2px, 2px);
+}
+#endingScreen.show-btn .ending-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@keyframes endingMsgIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #endingScreen { transition: none; }
+  .ending-message { animation: none; opacity: 1; }
+  .ending-btn { transition: none; }
+}
+
 /* ==== モーダル共通 ==== */
 .modal-overlay {
   display: none;
@@ -1234,6 +1348,26 @@ body {
 <!-- 結果表示直後の連打ガード（3秒間タップを遮断して結果を見られるようにする） -->
 <div id="tapGuard" aria-hidden="true"></div>
 
+<!-- ==== 真エンディング演出（B60クリア時のみ・暗転→3秒→結果を見る） ==== -->
+<div id="endingScreen" role="dialog" aria-modal="true" aria-label="エンディング" hidden>
+  <div class="ending-inner">
+    <div class="ending-bear" aria-hidden="true">🐻</div>
+    <div class="ending-message">
+      <p>こんなに頑張ったのに</p>
+      <p>熊のファースパートナーは見つからなかった</p>
+      <p class="ending-gap"></p>
+      <p>熊は永遠のセカンドパートナーなのか</p>
+      <p class="ending-gap"></p>
+      <p>ファーストパートナーを見つけることはできるのか</p>
+      <p class="ending-gap"></p>
+      <p>全ては運と巡り合わせの気分次第...</p>
+    </div>
+  </div>
+  <div class="ending-footer">
+    <button id="endingResultBtn" type="button" class="btn ending-btn">結果を見る</button>
+  </div>
+</div>
+
 <!-- ==== モーダル: ルール説明 ==== -->
 <div id="ruleModal" class="modal-overlay" role="dialog" aria-modal="true">
   <div class="modal-box">
@@ -1368,6 +1502,7 @@ const CONFIG = Object.freeze({
   PLAYER_SATIETY: 100,
   INV_MAX:         10,
   LV_MAX:          42,
+  FINAL_FLOOR:     60,    // v5.1: 真エンディングのボスフロア（ここの主を倒すとゲーム完結）
 
   // 経験値・レベルアップ（§8.1）。Lv1〜30は現行式のまま、Lv31以降は線形で緩やかに
   // （深層オーバーホールv5: Lv上限引き上げに伴い、高レベルの指数爆発を抑えて到達可能に）。
@@ -1888,7 +2023,18 @@ const Dungeon = (() => {
       enemyUsed.add(keyOf(c.x, c.y));
     }
 
-    return { tiles, rooms, stairs, start, items, traps, enemies };
+    // --- 最終フロア(B60)は単体ボス戦のアリーナ（v5.1）。雑魚・追加湧きなし、ボスは階段位置（startから離れた部屋）に配置。
+    //     ボス撃破でゲーム完結（真エンディング）。降り階段は無効化される。 ---
+    let bossFloor = false;
+    if (floorNo >= CONFIG.FINAL_FLOOR) {
+      bossFloor = true;
+      enemies.length = 0;
+      const boss = Core.makeEnemy('dragon', floorNo, stairs.x, stairs.y, playerLv);
+      boss.boss = true;
+      enemies.push(boss);
+    }
+
+    return { tiles, rooms, stairs, start, items, traps, enemies, bossFloor };
   }
 
   return { generate, _startRoomIdxOf: null };
@@ -2046,6 +2192,7 @@ const Core = {
       spawnTick: 0,
       over: false,
       giveup: false,
+      cleared: false,  // v5.1: B60ボス撃破による完結（真エンディング）
       deathCause: '',
       player: {
         x: d.start.x,
@@ -2075,6 +2222,7 @@ const Core = {
       enemies: d.enemies,
       explored: Core._blankBool(),
       stairsSeen: false,
+      bossFloor: !!d.bossFloor,
       bubbleText: '',
     };
   },
@@ -2098,6 +2246,7 @@ const Core = {
     run.player.y = d.start.y;
     run.explored = Core._blankBool();
     run.stairsSeen = false;
+    run.bossFloor = !!d.bossFloor; // v5.1: 最終フロアか
     run.spawnTick = 0;
     run.fpGuardUsed = false; // FPの毛皮の「かばう」はフロアにつき1回
   },
@@ -2426,8 +2575,9 @@ const Core = {
         break;
       }
       case 'descend': {
-        // 階段タイル上のときのみ。ターン消費なし（新フロアで敵フェーズを回さない）
-        if (p.x === run.stairs.x && p.y === run.stairs.y) {
+        // 階段タイル上のときのみ。ターン消費なし（新フロアで敵フェーズを回さない）。
+        // 最終フロア(B60)は降り階段なし＝これより深くは進めない（v5.1）。
+        if (!run.bossFloor && p.x === run.stairs.x && p.y === run.stairs.y) {
           this.nextFloor(run);
           events.push({ t: 'descended' });
           msg('B' + run.floor + 'F へ降りた');
@@ -2716,8 +2866,8 @@ const Core = {
       }
     }
 
-    // ③ 階段タイル検出（自動では降りない）
-    if (p.x === run.stairs.x && p.y === run.stairs.y) {
+    // ③ 階段タイル検出（自動では降りない）。最終フロアは降り階段なし（v5.1）
+    if (!run.bossFloor && p.x === run.stairs.x && p.y === run.stairs.y) {
       events.push({ t: 'stairs' });
     }
   },
@@ -2745,11 +2895,28 @@ const Core = {
    * ターン消費時の後続処理（敵フェーズ→ターン経過→追加湧き）。
    */
   _resolveTurn(run, events) {
+    // 直前のプレイヤー行動でボスを倒していたら、ここで完結（敵フェーズ前＝最後の反撃を受けない）
+    this._checkBossCleared(run, events);
+    if (run.over) return;
     this._enemyPhase(run, events);
     if (run.over) return;
     this._elapse(run, events);
     if (run.over) return;
     this._spawnPhase(run);
+  },
+
+  /**
+   * 最終フロアのボス撃破判定（v5.1）。ボスが消えていれば run.cleared を立てて完結。
+   * @param {object} run
+   * @param {Array} events
+   */
+  _checkBossCleared(run, events) {
+    if (run.cleared || run.over) return;
+    if (run.bossFloor && !run.enemies.some(e => e.boss)) {
+      run.cleared = true;
+      run.over = true;
+      events.push({ t: 'msg', text: '最果ての主をたおした…！' });
+    }
   },
 
   /**
@@ -3025,6 +3192,7 @@ const Core = {
    * 追加湧き（SPAWN周期・上限未満なら、プレイヤーのいる部屋以外の空き床に1体）。
    */
   _spawnPhase(run) {
+    if (run.bossFloor) return; // v5.1: ボスフロアは追加湧きなし（単体ボス戦）
     run.spawnTick++;
     if (run.spawnTick < this.spawnInterval(run.floor)) return;
     if (run.enemies.length >= this.enemyCap(run.floor)) return;
@@ -3239,7 +3407,10 @@ const Game = {
     document.getElementById('resultScore').textContent = 'B' + score + 'F';
 
     let msg;
-    if (run.giveup) {
+    if (run.cleared) {
+      // B60ボス撃破による完結（真エンディング）。物語の余韻は演出側で表示
+      msg = '熊は最果てB' + score + 'Fの主をたおした…！';
+    } else if (run.giveup) {
       msg = '熊は探すのをやめて山へ帰った…';
     } else {
       // 死亡時は死因を併記（§4.4）
@@ -3250,14 +3421,23 @@ const Game = {
 
     // 結果シェア文（スコア入り。§4.4-5。URLはシェア処理側で付与）
     const shareBtn = document.getElementById('btnShareResult');
-    shareBtn.dataset.shareText = '『熊のFP探し』B' + score + 'Fまで潜った！きみはどこまで行ける？';
+    shareBtn.dataset.shareText = run.cleared
+      ? '『熊のFP探し』ついに最果てB' + score + 'Fを制覇！きみはここまで行ける？'
+      : '『熊のFP探し』B' + score + 'Fまで潜った！きみはどこまで行ける？';
 
-    // 独り言の吹き出しを消してから結果画面へ
+    // 独り言の吹き出しを消してから結果へ
     run.bubbleText = '';
-    UI.showScreen('result');
-    // 結果表示直後の連打が「もう一度/ホーム/実験場」を誤爆しないよう3秒だけタップ遮断
-    UI.guardTaps(3000);
-    Ranking.onResultShown(run.deepest, run.name);
+    const toResult = () => {
+      UI.showScreen('result');
+      // 結果表示直後の連打が「もう一度/ホーム/実験場」を誤爆しないよう一時的にタップ遮断
+      UI.guardTaps(run.cleared ? 600 : 3000); // クリア時はエンディングで間を取ったので短く
+      Ranking.onResultShown(run.deepest, run.name);
+    };
+    if (run.cleared) {
+      UI.showEnding(toResult); // 真エンディング演出（暗転→3秒→結果を見る）→ 結果画面へ
+    } else {
+      toResult();
+    }
   },
 };
 
@@ -3513,9 +3693,9 @@ const Render = (() => {
         const factor = vis ? 1 : DIM;          // 視界内=通常／踏破済み視界外=減光
 
         if (t === 1 || t === 2) {
-          // 床（階段タイルなら床の上に階段を重ねる）
+          // 床（階段タイルなら床の上に階段を重ねる）。最終フロアは降り階段なし（v5.1）
           drawFloor(ctx, sx, sy, x, y, t === 1, factor);
-          if (run.stairsSeen && x === run.stairs.x && y === run.stairs.y) {
+          if (!run.bossFloor && run.stairsSeen && x === run.stairs.x && y === run.stairs.y) {
             drawStair(ctx, sx, sy, factor);
           }
         } else {
@@ -3654,8 +3834,8 @@ const Render = (() => {
         ctx.fillRect(x * S, y * S, S, S);
       }
     }
-    // 階段（踏破済みのみ・金色）
-    if (run.stairsSeen) {
+    // 階段（踏破済みのみ・金色）。最終フロアは降り階段なし（v5.1）
+    if (run.stairsSeen && !run.bossFloor) {
       ctx.fillStyle = '#e6b800';
       ctx.fillRect(run.stairs.x * S, run.stairs.y * S, S, S);
     }
@@ -4367,6 +4547,33 @@ const UI = (() => {
   }
 
   /**
+   * 真エンディング演出（B60クリア時）。暗転→メッセージ→3秒後に「結果を見る」を表示。
+   * ボタン押下でオーバーレイを閉じ onDone（結果画面遷移）を呼ぶ。二重発火ガードあり。
+   * @param {Function} onDone
+   */
+  function showEnding(onDone) {
+    const el = document.getElementById('endingScreen');
+    if (!el) { if (typeof onDone === 'function') onDone(); return; }
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      el.classList.remove('visible', 'show-btn');
+      el.setAttribute('hidden', '');
+      if (typeof onDone === 'function') onDone();
+    };
+    const btn = document.getElementById('endingResultBtn');
+    if (btn) btn.addEventListener('click', finish, { once: true });
+    el.removeAttribute('hidden');
+    void el.offsetWidth; // reflow を挟んで transition を確実に発火
+    el.classList.add('visible');
+    setTimeout(() => {
+      if (finished) return;
+      el.classList.add('show-btn');
+    }, 3000);
+  }
+
+  /**
    * モーダルを開く。
    * @param {string} id - モーダル要素のID
    */
@@ -4533,7 +4740,7 @@ const UI = (() => {
     });
   });
 
-  return { showScreen, openModal, closeModal, confirm, doShare, guardTaps };
+  return { showScreen, openModal, closeModal, confirm, doShare, guardTaps, showEnding };
 })();
 
 // ==== SECTION: SUPABASE ====

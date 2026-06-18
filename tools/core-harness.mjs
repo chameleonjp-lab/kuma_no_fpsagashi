@@ -250,6 +250,21 @@ group('deepReach', () => {
   const aAtk = (CONFIG.PLAYER_ATK + 31) + 36, aDef = (CONFIG.PLAYER_DEF + Math.floor(32/3)) + 32, aHp = CONFIG.PLAYER_HP + 31 * CONFIG.LVUP_HP;
   const aTaken = Math.ceil(drg.hp / Math.max(1, aAtk - drg.def)) * Math.max(1, drg.atk - Math.max(0, aDef - 9));
   ok(aTaken > aHp, `B60 平均プレイは敗北＝運ゲート維持（必要被弾${aTaken} > HP${aHp}）`);
+
+  // v5.1: 最終フロア(B60)は単体ボス戦のアリーナ＋撃破でゲーム完結（真エンディング）
+  const bf = Dungeon.generate(CONFIG.FINAL_FLOOR, CONFIG.LV_MAX);
+  ok(bf.bossFloor === true, '最終フロアは bossFloor フラグつき');
+  ok(bf.enemies.length === 1 && bf.enemies[0].boss === true && bf.enemies[0].kind === 'dragon', '最終フロアは単体ボス(ドラゴン)のみ');
+  const r2 = Core.newRun('boss');
+  r2.bossFloor = true;
+  r2.enemies = [{ x:5, y:5, kind:'dragon', hp:1, maxHp:1, atk:1, def:0, exp:1, boss:true, stun:0, confuse:0, cool:0 }];
+  Core._checkBossCleared(r2, []);
+  ok(!r2.cleared && !r2.over, 'ボス健在なら未完結');
+  r2.enemies = [];
+  Core._checkBossCleared(r2, []);
+  ok(r2.cleared === true && r2.over === true, 'ボス撃破で完結（cleared/over が立つ）');
+  // 通常フロアでは bossFloor が立たない（B59以浅）
+  ok(Dungeon.generate(CONFIG.FINAL_FLOOR - 1, CONFIG.LV_MAX).bossFloor !== true, 'B59はボスフロアでない');
 }, [typeof Core?.makeEnemy === 'function']);
 
 // ---------- gear: 装備の多段階化と出現階バンド（v2.2「深い階ほど強い装備」） ----------

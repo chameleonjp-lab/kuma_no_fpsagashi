@@ -204,3 +204,16 @@ HUD/操作:
 - 【移動キー拡大（モバイルUX指摘）】`#dpad` 上下左右 66→76px（+15%・斜め四隅は誤タップ防止で50→52px）。`#controls` gap8→6・padding 8/10→7/8、`#actionBtns` 150→140px で横幅を捻出。結果: dpad 186×186・controls高 +12px・キャンバス 344→332px（−3.5%）・375pxで横スクロールなし・全タップ≥52px。
 - 検証: core-harness **817全合格**（新規 `deepReach` 群で「B60 LUCKY=撃破可能／AVG=敗北＝運ゲート維持」を固定。xpNeed piecewise・LV_MAX42・装備単調性も）。`tools/balance-v5-check.mjs`（B30〜60マッチアップ・B60 LUCKY WIN +96／AVG LOSE −890／平均の壁B47〜50）。構文OK・DOM起動 例外なし。`tools/optimalplay.mjs` は自前の餓え/中盤限界で到達は約B24のまま（深層数式の証明はボットではなく deepReach＋balance-v5-check が担う）。
 - 要確認: 実プレイでLUCKY運が「+18強化/+72maxHp」級のドロップを現実に拾えるか（数式は成立）。渋ければ強化巻/おおいのち草のドロップ重みを微増で調整余地（数値据え置き）。
+
+## 2026-06-18 リビジョンv5.1（B60真エンディング）
+
+依頼: 「60層のボスを倒した後、結果表示前に、UIを出さない真っ黒の画面でエンディングメッセージを表示。3秒後に画面下部の『結果を見る』ボタンで結果画面へ」。Opusで役割分担（ナラティブ/UX演出＝サブエージェント、ゲームロジック/QA＝メイン）で実装。
+
+- 【最終フロアをボスアリーナ化】`CONFIG.FINAL_FLOOR=60`。B60は単体ボス戦（ぬしのドラゴンを `boss:true` で1体だけ・雑魚/追加湧きなし・降り階段なし）。`Dungeon.generate` がボスを階段位置（startから離れた部屋）へ置き、戻り値に `bossFloor` を付与。`run.bossFloor`/`run.cleared` を新設。
+  - ボスは `Core.makeEnemy('dragon',60,...)`＝HP630/atk161/def65/pierce9（deepReach検証済みの「LUCKYなら1対1勝利可能」なボス）。単体戦なのでB60到達さえできれば最適＋運で撃破可能。B40〜59の道中（群れ）が本番の運ゲート。
+  - 降り階段は無効化（`_onLand` の階段検出・`act` のdescend・描画・ミニマップを `!run.bossFloor` でガード）。ボスは階段タイルを塞ぐので撃破前に降りられず、撃破で即完結するため抜け道なし。
+  - `_spawnPhase` はボスフロアで早期return（湧きなし）。
+- 【ボス撃破＝完結】`_resolveTurn` 冒頭に `_checkBossCleared` を追加（敵フェーズ前＝最後の反撃を受けずに完結）。ボスが消えていれば `run.cleared=run.over=true`。近接/投擲どちらの撃破でも `_resolveTurn` 経由で検出。
+- 【真エンディング演出】`endRun` で `run.cleared` のとき `UI.showEnding(onDone)` を呼ぶ。`#endingScreen`（z-index1000・完全な黒で全UI/HUD/キャンバスを被覆）に依頼の6行メッセージ（「ファースパートナー」表記は依頼者の意図どおり原文保持）を表示→3秒後に「結果を見る」をフェードイン（出現前は pointer-events:none で先走りタップ防止）→押下でオーバーレイを閉じ結果画面へ。二重発火ガード・prefers-reduced-motion対応・safe-area対応・iPhone SEで横スクロールなし（最長行は nowrap、<360pxは折返し）。音声なし。
+- 結果画面の文言/シェアもクリア用に分岐（「最果てB60Fの主をたおした…！」「ついに最果てB60Fを制覇！」）。スコアは B60F、ランキング自動送信は従来どおり（ボタンで結果遷移後に onResultShown）。「もう一度」は newRun が cleared=false に戻すため通常どおり。
+- 検証: core-harness **822全合格**（deepReachにボスフロア生成=単体boss・撃破でcleared/over・B59は非ボスを追加）。CORE結合テストで B59→B60降下→ボスフロア生成→降り無効→撃破で cleared/over/deepest60 を確認。構文OK・DOM起動 例外なし。
