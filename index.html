@@ -4818,10 +4818,16 @@ const Ranking = (() => {
 
     const shown = list.slice(0, CONFIG.RANK_SHOW);
     for (const r of shown) {
-      // フィールド名は防御的に読む（rank_no/rank・display_name/name）
+      // フィールド名は防御的に読む（rank_no/rank・display_name/name・score系）
       const rankNo = r.rank_no ?? r.rank;
       const name   = r.display_name ?? r.name ?? '';
-      const score  = r.score;
+      const rawScore =
+        r.best_score ??
+        r.first_score ??
+        r.score ??
+        r.bestScore ??
+        r.firstScore ??
+        0;
 
       const row = document.createElement('div');
       row.className = 'rank-row';
@@ -4838,7 +4844,7 @@ const Ranking = (() => {
 
       const scoreEl = document.createElement('span');
       scoreEl.className = 'rank-score';
-      scoreEl.textContent = `B${score}F`;
+      scoreEl.textContent = `B${rawScore}F`;
 
       row.appendChild(noEl);
       row.appendChild(nameEl);
