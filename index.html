@@ -1468,6 +1468,7 @@ const CONFIG = Object.freeze({
   SUPABASE_KEY:    'sb_publishable_drzcy0v97knU6FgjqSgBHw_0A9XPdFM',
   // ゲーム識別子・バージョン（§9.3）
   GAME_SLUG:       'kuma_no_fpsagashi',
+  GAME_URL:        'https://chameleonjp.codeberg.page/kuma_no_fpsagashi/',
   CLIENT_VERSION:  'v1',
   // 実験場URL（§4.1）
   LAB_URL:         'https://chameleonjp.codeberg.page/chameleonjp_lab/',
@@ -4609,8 +4610,8 @@ const UI = (() => {
    * @param {HTMLButtonElement} btn - ボタン要素（文言を一時的に変更するため）
    */
   async function doShare(shareText, btn) {
-    const url     = location.href;
-    const fullText = shareText + ' ' + url;
+    const url      = CONFIG.GAME_URL;
+    const fullText = `${shareText}\n${url}`;
     try {
       if (navigator.share) {
         await navigator.share({ text: shareText, url });
