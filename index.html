@@ -1976,6 +1976,16 @@ const Dungeon = (() => {
       items.push({ x: c.x, y: c.y, kind: pick(itemKinds) });
       used.add(keyOf(c.x, c.y));
     }
+    // B30以降の食料は通常アイテム枠とは別枠で抽選する。
+    // 最低保証ではなく、20%の当選時だけ1個追加（はちみつ70% / おおきな鮭30%）。
+    if (floorNo >= 30 && Math.random() < 0.20) {
+      for (const c of itemPool) {
+        if (used.has(keyOf(c.x, c.y))) continue;
+        items.push({ x: c.x, y: c.y, kind: Math.random() < 0.70 ? 'hachimitsu' : 'sake' });
+        used.add(keyOf(c.x, c.y));
+        break;
+      }
+    }
 
     // --- traps: 個数は§5.2式・部屋床のみ・start/stairs/itemsと重複なし ---
     const trapCount = Math.min(
@@ -2727,8 +2737,8 @@ const Core = {
         // アイテムを足元に置く（§8.4・decisions.md）
         const itemP = p.inv[action.idx];
         if (!itemP) return { events, turnSpent: false };
-        // 装備中は置けない
-        if (itemP === p.weapon || itemP === p.shield) {
+        // 装備中は置けない（武器/盾/飾りを共通判定）
+        if (this._isEquipped(run, itemP)) {
           msg('装備中のものは置けない');
           return { events, turnSpent: false };
         }
@@ -2739,7 +2749,8 @@ const Core = {
           return { events, turnSpent: false };
         }
         const inameP = DATA.ITEMS[itemP.kind].name;
-        run.items.push({ x: p.x, y: p.y, kind: itemP.kind });
+        const floorItem = { ...itemP, x: p.x, y: p.y };
+        run.items.push(floorItem);
         p.inv.splice(action.idx, 1);
         msg(inameP + 'を置いた');
         turnSpent = true;
@@ -2832,7 +2843,10 @@ const Core = {
       const iname = DATA.ITEMS[it.kind].name;
       // A2: 装備中アイテムは枠を消費しない（非装備数で上限判定）
       if (this._carriedCount(run) < CONFIG.INV_MAX) {
-        p.inv.push({ kind: it.kind });
+        const picked = { ...it };
+        delete picked.x;
+        delete picked.y;
+        p.inv.push(picked);
         run.items.splice(itemIdx, 1);
         msg(iname + 'を拾った');
       } else {

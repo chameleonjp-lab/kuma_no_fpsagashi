@@ -465,6 +465,22 @@ group('items', () => {
   const pr = Core.act(r, { type: 'place', idx: pi });
   ok(r.items.length === itemsBefore + 1 && r.player.inv.length === 0, '置く: 足元に出現・inv減');
 
+  // 置く/拾う: 個体情報（plus/charges等）を kind だけに潰さず保持する
+  r = mk(); r.items = r.items.filter(it => !(it.x === r.player.x && it.y === r.player.y));
+  r.player.inv.push({ kind:'tsume3', plus:2 });
+  Core.act(r, { type:'place', idx:r.player.inv.length - 1 });
+  ok(r.items.some(it => it.x === r.player.x && it.y === r.player.y && it.kind === 'tsume3' && it.plus === 2), '置く: 個体情報plusを床へ保持');
+  Core._onLand(r, []);
+  ok(r.player.inv.some(it => it.kind === 'tsume3' && it.plus === 2 && it.x === undefined && it.y === undefined), '拾う: 座標を除いて個体情報plusを保持');
+
+  // 置く: 飾りも含めた共通の装備中判定で拒否する
+  r = mk(); r.items = r.items.filter(it => !(it.x === r.player.x && it.y === r.player.y));
+  r.player.inv.push({ kind:'kazariChikara' });
+  r.player.accessory = r.player.inv[r.player.inv.length - 1];
+  const beforeInv = r.player.inv.length, beforeItems = r.items.length;
+  Core.act(r, { type:'place', idx:r.player.inv.length - 1 });
+  ok(r.player.inv.length === beforeInv && r.items.length === beforeItems, '置く: 装備中の飾りは置けない');
+
   // 投擲: 直線上の敵に matsubokkuri ダメージ（攻撃連動・D2）・item消費
   r = mk();
   // プレイヤーを内側の安全位置へ固定（端スポーンで右方向が盤外になる揺れを防ぐ）
@@ -754,8 +770,9 @@ group('gen', () => {
     const sr = rooms.findIndex(r => inRoom(stairs, r)), pr = rooms.findIndex(r => inRoom(start, r));
     if (sr === -1 || pr === -1 || sr === pr) { ok(false, `階段/初期位置の部屋分離違反 (floor${f} #${i})`); break; }
     // 配置数
-    // アイテム数は B10+ で 3-5、それ未満は 2-4（深層の資源を増やす）
-    const iLo = f >= 10 ? 3 : 2, iHi = f >= 10 ? 5 : 4;
+    // 通常アイテム数は B10+ で 3-5、それ未満は 2-4（深層の通常資源数は維持）。
+    // B30以降のみ、別枠20%抽選の食料が最大1個追加される。
+    const iLo = f >= 10 ? 3 : 2, iHi = (f >= 10 ? 5 : 4) + (f >= 30 ? 1 : 0);
     if (!(items.length >= iLo && items.length <= iHi)) { ok(false, `アイテム数 ${items.length}（floor${f} 期待${iLo}..${iHi}）`); break; }
     const bonus = Math.floor((f - 1) / CONFIG.TRAP_PER_FLOORS);
     const tmin = Math.min(CONFIG.TRAP_MIN + bonus, CONFIG.TRAP_CAP);
