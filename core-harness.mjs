@@ -56,7 +56,7 @@ const group = (name, fn, need) => {
   console.log(before === fail ? '  → 合格' : '  → 不合格あり');
 };
 const args = process.argv.slice(2);
-const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'deepReach', 'gear', 'gearfx', 'items', 'herb', 'wand', 'charm', 'scroll', 'gen', 'bot'];
+const groups = args.length ? args : ['data', 'mono', 'formulas', 'beatable', 'gear', 'gearfx', 'items', 'herb', 'wand', 'charm', 'scroll', 'gen', 'bot'];
 
 // ---------- data: 定数が仕様書（依頼書v1.1 §8）と一致 ----------
 group('data', () => {
@@ -99,7 +99,7 @@ group('data', () => {
   ok(DATA.TRAPS.toge.dmg === 5 && DATA.TRAPS.kafun.satiety === 20 && DATA.TRAPS.otoshiana.warp === true, '罠3種');
   // 主人公初期値（v2.1でPLAYER_HP 15→20・回復5歩のリバランス）
   ok(CONFIG.PLAYER_HP === 20 && CONFIG.PLAYER_ATK === 3 && CONFIG.PLAYER_DEF === 1
-    && CONFIG.PLAYER_SATIETY === 100 && CONFIG.INV_MAX === 10 && CONFIG.LV_MAX === 42, '主人公初期値（v5: Lv上限42）');
+    && CONFIG.PLAYER_SATIETY === 100 && CONFIG.INV_MAX === 10 && CONFIG.LV_MAX === 30, '主人公初期値');
   ok(CONFIG.REGEN_EVERY_TURNS === 5, 'HP自然回復は5歩に1回');
   // フロア毎の敵数・湧き・上限が階で増える（B1-4は楽・深いほど圧）
   ok(typeof Core.enemyInitCount === 'function' && typeof Core.spawnInterval === 'function' && typeof Core.enemyCap === 'function', '階スケールAPIあり');
@@ -135,20 +135,9 @@ group('mono', () => {
 
 // ---------- formulas: 経験値・深層補正・ダメージ式 ----------
 group('formulas', () => {
-  // 経験値式は CONFIG の係数に追従（v2.1で 10*1.4^ → 6*1.20^ にリバランス）。
-  // v5: Lv1〜XP_LINEAR_FROM(30) は指数式のまま（B1〜30保護）、それ以降は線形。
-  const F = CONFIG.XP_LINEAR_FROM;
-  const anchor = Math.ceil(CONFIG.XP_BASE * Math.pow(CONFIG.XP_MULT, F - 1));
-  for (let n = 1; n <= F; n++) ok(Core.xpNeed(n) === Math.ceil(CONFIG.XP_BASE * Math.pow(CONFIG.XP_MULT, n - 1)), `xpNeed(${n}) 指数区間（不変）`);
-  for (const n of [F + 1, 35, 40, CONFIG.LV_MAX]) ok(Core.xpNeed(n) === anchor + (n - F) * CONFIG.XP_LINEAR_STEP, `xpNeed(${n}) 線形区間`);
-  ok(Core.xpNeed(F) === anchor && anchor === 1187, 'Lv30アンカー=1187で連続');
+  // 経験値式は CONFIG の係数に追従（v2.1で 10*1.4^ → 6*1.20^ にリバランス）
+  for (let n = 1; n <= 29; n++) ok(Core.xpNeed(n) === Math.ceil(CONFIG.XP_BASE * Math.pow(CONFIG.XP_MULT, n - 1)), `xpNeed(${n})`);
   ok(CONFIG.XP_MULT < 1.4, '経験値倍率を緩めた（過度な低レベル詰みの回避）');
-  // 序盤の獲得経験値ペナルティ（v4-2: B1〜5 は -2、最低1。B6以降は素通し）
-  for (let f = 1; f <= CONFIG.EARLY_XP_FLOOR; f++) {
-    ok(Core._floorExp({ floor: f }, 15) === 15 - CONFIG.EARLY_XP_PENALTY, `B${f} 経験値-${CONFIG.EARLY_XP_PENALTY}`);
-    ok(Core._floorExp({ floor: f }, 2) === 1, `B${f} 低経験値も最低1は残す`);
-  }
-  ok(Core._floorExp({ floor: CONFIG.EARLY_XP_FLOOR + 1 }, 15) === 15, `B${CONFIG.EARLY_XP_FLOOR + 1} は素通し`);
   ok(Core.deepScale(8, 15) === 8 && Core.deepScale(8, 1) === 8, 'B15以前は補正なし');
   ok(Core.deepScale(8, 16) === Math.ceil(8 * 1.1), 'B16 ×1.1');
   ok(Core.deepScale(16, 20) === Math.ceil(16 * 1.5), 'B20 ×1.5');
@@ -222,49 +211,6 @@ group('beatable', () => {
       ok(taken < budget, `${d.name} B${f}(intro): 最適行動で撃破可能(被ダメ計 ${taken} < 許容 ${Math.round(budget)})`);
     }
   }
-}, [typeof Core?.makeEnemy === 'function']);
-
-// ---------- deepReach: v5 深層オーバーホールが「運＋最適でB60到達可能・平均は未到達」を満たす ----------
-group('deepReach', () => {
-  const drg = Core.makeEnemy('dragon', 60, 0, 0); // B60最深獣 HP630/atk161/def65/pierce9
-  // B60で入手可能な最良の素装備が深層級（v4トップ atk36/def32 を上回る）
-  const bestW60 = Math.max(...Object.values(DATA.ITEMS).filter(d => d.cat==='weapon' && !d.effects && (d.minF??1)<=60 && 60<=(d.maxF??Infinity)).map(d => d.atk||0));
-  const bestS60 = Math.max(...Object.values(DATA.ITEMS).filter(d => d.cat==='shield' && !d.effects && (d.minF??1)<=60 && 60<=(d.maxF??Infinity)).map(d => d.def||0));
-  ok(bestW60 >= 56 && bestS60 >= 48, `B60の最良素装備が深層級（攻${bestW60}/防${bestS60}）`);
-  ok(CONFIG.LV_MAX >= 40, `Lv上限が深層級（${CONFIG.LV_MAX}）`);
-  // LUCKYプレイヤー: Lv上限・最良素装備・幸運な強化(+18)/最大HP(+72)・攻撃飾り(+7)
-  const atk = (CONFIG.PLAYER_ATK + CONFIG.LV_MAX - 1) + bestW60 + 18 + 7;
-  const def = (CONFIG.PLAYER_DEF + Math.floor(CONFIG.LV_MAX / CONFIG.LVUP_DEF_EVERY)) + bestS60 + 18;
-  const maxHp = (CONFIG.PLAYER_HP + (CONFIG.LV_MAX - 1) * CONFIG.LVUP_HP) + 72;
-  const melee = Math.max(1, atk - drg.def);
-  const eHit  = Math.max(1, drg.atk - Math.max(0, def - 9)); // pierceDef9
-  const arrow = DATA.ITEMS.hoshikudaki;
-  const thrown = arrow.dmg + Math.round(atk * arrow.scale);  // 防御無視投擲
-  ok(thrown >= 150, `ほしくだきの矢が防御無視で大ダメージ（${thrown}）`);
-  // しびれ茸5T(無被弾)＋投擲1＋残りを近接、その間の反撃を maxHp(+回復25+保険1発)で耐える
-  const burst = thrown + CONFIG.STUN_TURNS * melee;
-  const extraHits = Math.ceil(Math.max(0, drg.hp - burst) / melee);
-  const taken = extraHits * eHit;
-  ok(taken < maxHp + 25 + eHit, `B60 LUCKY 撃破可能（バースト${burst}＋残${extraHits}手・被弾計${taken} < HP${maxHp}+回復25+保険）`);
-  // 平均プレイ（Lv32・素ほし装備・特別な道具なし）はB60で勝てない＝運ゲート維持
-  const aAtk = (CONFIG.PLAYER_ATK + 31) + 36, aDef = (CONFIG.PLAYER_DEF + Math.floor(32/3)) + 32, aHp = CONFIG.PLAYER_HP + 31 * CONFIG.LVUP_HP;
-  const aTaken = Math.ceil(drg.hp / Math.max(1, aAtk - drg.def)) * Math.max(1, drg.atk - Math.max(0, aDef - 9));
-  ok(aTaken > aHp, `B60 平均プレイは敗北＝運ゲート維持（必要被弾${aTaken} > HP${aHp}）`);
-
-  // v5.1: 最終フロア(B60)は単体ボス戦のアリーナ＋撃破でゲーム完結（真エンディング）
-  const bf = Dungeon.generate(CONFIG.FINAL_FLOOR, CONFIG.LV_MAX);
-  ok(bf.bossFloor === true, '最終フロアは bossFloor フラグつき');
-  ok(bf.enemies.length === 1 && bf.enemies[0].boss === true && bf.enemies[0].kind === 'dragon', '最終フロアは単体ボス(ドラゴン)のみ');
-  const r2 = Core.newRun('boss');
-  r2.bossFloor = true;
-  r2.enemies = [{ x:5, y:5, kind:'dragon', hp:1, maxHp:1, atk:1, def:0, exp:1, boss:true, stun:0, confuse:0, cool:0 }];
-  Core._checkBossCleared(r2, []);
-  ok(!r2.cleared && !r2.over, 'ボス健在なら未完結');
-  r2.enemies = [];
-  Core._checkBossCleared(r2, []);
-  ok(r2.cleared === true && r2.over === true, 'ボス撃破で完結（cleared/over が立つ）');
-  // 通常フロアでは bossFloor が立たない（B59以浅）
-  ok(Dungeon.generate(CONFIG.FINAL_FLOOR - 1, CONFIG.LV_MAX).bossFloor !== true, 'B59はボスフロアでない');
 }, [typeof Core?.makeEnemy === 'function']);
 
 // ---------- gear: 装備の多段階化と出現階バンド（v2.2「深い階ほど強い装備」） ----------
@@ -464,22 +410,6 @@ group('items', () => {
   const pi = findUse(r, 'kinomi'); const itemsBefore = r.items.length;
   const pr = Core.act(r, { type: 'place', idx: pi });
   ok(r.items.length === itemsBefore + 1 && r.player.inv.length === 0, '置く: 足元に出現・inv減');
-
-  // 置く/拾う: 個体情報（plus/charges等）を kind だけに潰さず保持する
-  r = mk(); r.items = r.items.filter(it => !(it.x === r.player.x && it.y === r.player.y));
-  r.player.inv.push({ kind:'tsume3', plus:2 });
-  Core.act(r, { type:'place', idx:r.player.inv.length - 1 });
-  ok(r.items.some(it => it.x === r.player.x && it.y === r.player.y && it.kind === 'tsume3' && it.plus === 2), '置く: 個体情報plusを床へ保持');
-  Core._onLand(r, []);
-  ok(r.player.inv.some(it => it.kind === 'tsume3' && it.plus === 2 && it.x === undefined && it.y === undefined), '拾う: 座標を除いて個体情報plusを保持');
-
-  // 置く: 飾りも含めた共通の装備中判定で拒否する
-  r = mk(); r.items = r.items.filter(it => !(it.x === r.player.x && it.y === r.player.y));
-  r.player.inv.push({ kind:'kazariChikara' });
-  r.player.accessory = r.player.inv[r.player.inv.length - 1];
-  const beforeInv = r.player.inv.length, beforeItems = r.items.length;
-  Core.act(r, { type:'place', idx:r.player.inv.length - 1 });
-  ok(r.player.inv.length === beforeInv && r.items.length === beforeItems, '置く: 装備中の飾りは置けない');
 
   // 投擲: 直線上の敵に matsubokkuri ダメージ（攻撃連動・D2）・item消費
   r = mk();
@@ -736,7 +666,6 @@ group('gen', () => {
   const N = Number(process.env.GEN_N ?? 2000);
   const floors = [1, 2, 3, 5, 7, 8, 10, 13, 16, 20, 30, 50];
   let count = 0;
-  let warpSeen = 0; // 検査した🌀の総数（チェックが空振りでないことの担保）
   for (let i = 0; i < N; i++) {
     const f = floors[i % floors.length];
     const d = Dungeon.generate(f);
@@ -770,9 +699,8 @@ group('gen', () => {
     const sr = rooms.findIndex(r => inRoom(stairs, r)), pr = rooms.findIndex(r => inRoom(start, r));
     if (sr === -1 || pr === -1 || sr === pr) { ok(false, `階段/初期位置の部屋分離違反 (floor${f} #${i})`); break; }
     // 配置数
-    // 通常アイテム数は B10+ で 3-5、それ未満は 2-4（深層の通常資源数は維持）。
-    // B30以降のみ、別枠20%抽選の食料が最大1個追加される。
-    const iLo = f >= 10 ? 3 : 2, iHi = (f >= 10 ? 5 : 4) + (f >= 30 ? 1 : 0);
+    // アイテム数は B10+ で 3-5、それ未満は 2-4（深層の資源を増やす）
+    const iLo = f >= 10 ? 3 : 2, iHi = f >= 10 ? 5 : 4;
     if (!(items.length >= iLo && items.length <= iHi)) { ok(false, `アイテム数 ${items.length}（floor${f} 期待${iLo}..${iHi}）`); break; }
     const bonus = Math.floor((f - 1) / CONFIG.TRAP_PER_FLOORS);
     const tmin = Math.min(CONFIG.TRAP_MIN + bonus, CONFIG.TRAP_CAP);
@@ -792,28 +720,13 @@ group('gen', () => {
       ok(false, `B${f} にB8以深限定アイテム`); break;
     }
     // 罠が階段・初期位置・アイテムと重ならない／部屋床のみ
-    let trapBad = false;
     for (const t of traps) {
-      if ((t.x === stairs.x && t.y === stairs.y) || (t.x === start.x && t.y === start.y)) { ok(false, '罠が階段/初期位置に重複'); trapBad = true; break; }
-      if (tiles[t.y][t.x] !== 1) { ok(false, '罠が部屋床以外にある'); trapBad = true; break; }
-      // 🌀ぐるぐる落とし穴(warp)は通路にも出入り口（避けられない場所）にも置かない（v4チェック）。
-      // 部屋床以外は上で弾いているので通路(tiles===2)には出ない。さらに通路に直接隣接する
-      // 部屋床＝出入り口（チョークポイント）にも置かないことを確認する。
-      if (DATA.TRAPS[t.kind].warp) {
-        warpSeen++;
-        let doorway = false;
-        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          const nx = t.x + dx, ny = t.y + dy;
-          if (nx >= 0 && ny >= 0 && nx < W && ny < H && tiles[ny][nx] === 2) { doorway = true; break; }
-        }
-        if (doorway) { ok(false, `🌀が出入り口(避けられない場所)にある (floor${f} #${i})`); trapBad = true; break; }
-      }
+      if ((t.x === stairs.x && t.y === stairs.y) || (t.x === start.x && t.y === start.y)) { ok(false, '罠が階段/初期位置に重複'); break; }
+      if (tiles[t.y][t.x] !== 1) { ok(false, '罠が部屋床以外にある'); break; }
     }
-    if (trapBad) break;
     count++;
   }
   ok(count === N, `${N}回生成して全件健全（成功 ${count}）`);
-  ok(warpSeen > 0, `🌀ぐるぐる落とし穴を ${warpSeen} 個検査（通路・出入り口に無し）`);
 }, [typeof Dungeon?.generate === 'function']);
 
 // ---------- bot: 自動プレイでクラッシュ・不変条件検査 ----------

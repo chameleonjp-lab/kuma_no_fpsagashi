@@ -92,32 +92,6 @@ function lineToEnemy(run, maxR){
   return null;
 }
 
-// 眠り対策：近くにねむりヘビ等(ai:'sleep')がいて、まだ眠り除けが無効なら、
-// ねむけよけの鈴を装備 or きよめ草を飲む（実プレイヤーの定石。bot が眠り放置で過小評価されるのを防ぐ）。
-const hasSleepGuard = (run) => {
-  const p=run.player;
-  if(p.buffs && p.buffs.some(b=>b.stat==='sleepGuard')) return true;
-  for(const slot of ['accessory','weapon','shield']){
-    const it=p[slot]; if(it){ const d=DATA.ITEMS[it.kind]; if(d.effects && d.effects.some(ef=>ef.do==='sleepGuard')) return true; }
-  }
-  return false;
-};
-function useSleepGuardIfNeeded(run){
-  const p=run.player;
-  const sleepNear = run.enemies.some(e=>DATA.ENEMIES[e.kind].ai==='sleep' && cheb(e.x,e.y,p.x,p.y)<=6);
-  if(!sleepNear || hasSleepGuard(run)) return false;
-  const adj=adjEnemies(run);
-  // 鈴（常時効果の飾り）を装備（安全時のみ）
-  if(adj.length===0){
-    const charm = invFind(run, d=>d.cat==='charm' && d.effects && d.effects.some(ef=>ef.do==='sleepGuard'));
-    if(charm>=0){ Core.act(run,{type:'use',idx:charm}); return true; }
-  }
-  // きよめ草を飲む（一時バフ）
-  const herb = invFind(run, d=>d.cat==='herb' && d.effects && d.effects.some(ef=>ef.on==='drink'&&ef.stat==='sleepGuard'));
-  if(herb>=0){ Core.act(run,{type:'use',idx:herb}); return true; }
-  return false;
-}
-
 // ---- ボット方策 ----
 function naivePolicy(run){
   const p=run.player;
@@ -148,8 +122,6 @@ function smartPolicy(run){
   }
   // 2) 餓え対策
   if(p.satiety<=15){ const i=invFind(run,d=>d.cat==='food'); if(i>=0){ Core.act(run,{type:'use',idx:i}); return; } }
-  // 2.5) 眠り対策（ねむりヘビが近いうちに眠り除けを用意）
-  if(useSleepGuardIfNeeded(run)) return;
 
   // 3) 装備更新（隣接敵がいない安全時のみ）
   if(adj.length===0){
@@ -229,8 +201,6 @@ function farmerPolicy(run){
   }
   // 2) 餓え対策
   if(p.satiety<=20){ const i=invFind(run,d=>d.cat==='food'); if(i>=0){ Core.act(run,{type:'use',idx:i}); return; } }
-  // 2.5) 眠り対策（ねむりヘビが近いうちに眠り除けを用意）
-  if(useSleepGuardIfNeeded(run)) return;
   // 3) 装備更新（安全時）
   if(adj.length===0){
     const curW = p.weapon?DATA.ITEMS[p.weapon.kind].atk:0;
