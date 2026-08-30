@@ -93,7 +93,7 @@ on conflict (game_slug) do update set
 | 送信RPC | （表に明記なし） | `submit_score`（p_display_name/p_game_slug/p_score/p_client_version） | kit ranking-spec・johba作法 |
 | 取得・順位 | created_atタイブレーク | `get_best_score_ranking` の `rank_no`（同率順位対応）をそのまま表示 | 同上。RPCが順位を返す |
 | 接続方式 | supabase-js or REST（採用を報告） | **REST直接fetch**（apikey+Authorization Bearer） | 単一ファイル・外部CDN回避。kit/johba一致 |
-| 実験場URL | §4.1【要記入】 | kit定義の `https://chameleonjp.codeberg.page/chameleonjp_lab/` | 依頼書未記入のため既定値を採用（要確認・CONFIG.LAB_URL1箇所で変更可） |
+| 実験場URL | §4.1【要記入】 | kit定義の `https://chameleonjp-lab.github.io/chameleonjp_lab/` | 依頼書未記入のため既定値を採用（要確認・CONFIG.LAB_URL1箇所で変更可） |
 | 「あなた◯位」 | 欄外に正確な順位 | p_limit=100取得から同名一致の rank_no を表示（100位圏外は明示） | 共通RPCはプレイヤー毎ベスト集計のため近似 |
 
 ## 7. 要確認事項（依頼者へ）
