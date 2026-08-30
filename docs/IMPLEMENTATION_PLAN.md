@@ -13,7 +13,7 @@
 ## 2. 事前調査の結果（確定事項）
 
 - kit（chameleonjp_browser_game_kit）、実運用ゲーム johba、実験場リポジトリ chameleonjp_lab を精読済み。
-- **実験場URL**: `https://chameleonjp.codeberg.page/chameleonjp_lab/`（kit docs/lab-integration.md で定義。依頼書§4.1の【要記入】に充当・要確認）
+- **実験場URL**: `https://chameleonjp-lab.github.io/chameleonjp_lab/`（kit docs/lab-integration.md で定義。依頼書§4.1の【要記入】に充当・要確認）
 - **Supabase接続値**（kit docs/ranking-spec.md「公開してよい値」）:
   - URL: `https://mlpnjgezrnhdxsxolyzj.supabase.co`
   - Publishable key: `sb_publishable_drzcy0v97knU6FgjqSgBHw_0A9XPdFM`
