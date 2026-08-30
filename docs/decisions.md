@@ -13,7 +13,7 @@
 - 【同上】「あなた：◯位」は p_limit=100 で取得した一覧から display_name 一致行の rank_no を表示する近似実装。同名プレイヤーがいる場合は正確でないこと、100位圏外は「あなた：100位圏外」となることが制約
 - 送信は依頼書 §9.3 どおり**手動「ランキングに登録」ボタン**（kitは自動送信も許容しゲーム仕様の選択に委ねるため、依頼書を尊重。johba=自動送信とは異なる点として報告）
 - Supabase接続方式は **RESTを直接fetch**（supabase-js CDN不使用。kit雛形・johba・実験場docsのRESTフォールバック規定に一致。依頼書§2の「採用方式の報告」対象）
-- 実験場URLは依頼書§4.1で【要記入】のため、kit docs/lab-integration.md 定義の `https://chameleonjp.codeberg.page/chameleonjp_lab/` を CONFIG 定数 `LAB_URL` に設定（要確認）
+- 実験場URLは依頼書§4.1で【要記入】のため、kit docs/lab-integration.md 定義の `https://chameleonjp-lab.github.io/chameleonjp_lab/` を CONFIG 定数 `LAB_URL` に設定（要確認）
 - GAME_SLUG=`kuma_no_fpsagashi`（リポジトリ名準拠・要確認）、CLIENT_VERSION=`v1`、localStorageキー=`kuma_no_fpsagashi_player_name`
 - console.log は納品時ゼロ（§11）。ただし Supabase 失敗時の console.warn のみ johba 前例に倣い許容（デバッグ出力ではなく運用時のエラー可視化）
 - 途中版ファイル（index_v2.html等）は初回リリースのため作らない。次回以降の大改修時に kit 慣行どおり作成。開発履歴は本リポジトリの git コミットで担保
