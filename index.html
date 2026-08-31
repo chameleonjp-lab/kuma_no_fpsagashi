@@ -297,6 +297,14 @@ body {
   background: var(--clr-panel);
 }
 
+#nameError {
+  min-height: 1.5em;
+  margin: 8px 0 0;
+  color: #ff9d9d;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 /* ==== ゲーム画面 ==== */
 #screenGame {
   flex-direction: column;
@@ -1255,7 +1263,8 @@ body {
     <p class="name-title">🐻 冒険者のなまえ</p>
     <div class="name-form">
       <label class="name-label" for="nameInput">なまえ（1〜10文字）</label>
-      <input id="nameInput" type="text" maxlength="10" autocomplete="nickname" placeholder="ななしのくま">
+      <input id="nameInput" type="text" maxlength="10" autocomplete="nickname" placeholder="なまえを入力" aria-describedby="nameError">
+      <p id="nameError" role="alert" aria-live="polite"></p>
       <button id="btnGo" class="btn btn-primary">冒険に出る</button>
     </div>
   </section>
@@ -1474,7 +1483,6 @@ const CONFIG = Object.freeze({
   LAB_URL:         'https://chameleonjp-lab.github.io/chameleonjp_lab/',
   // localStorage キー（§4.2）
   STORAGE_NAME_KEY:'kuma_no_fpsagashi_player_name',
-  DEFAULT_NAME:    'ななしのくま',
 
   // ダンジョン生成パラメータ（§6.1）
   MAP_W:           32,
@@ -4663,16 +4671,31 @@ const UI = (() => {
     doShare('『熊のFP探し』FPを探して底なしダンジョンへ。どこまで潜れる？', this);
   });
 
-  // 名前入力: 冒険に出る
+  // 名前入力: 冒険に出る。空欄は既定値へ置き換えず、開始を止める。
   document.getElementById('btnGo').addEventListener('click', () => {
     const input  = document.getElementById('nameInput');
     const raw    = input.value.trim();
-    const name   = raw.length > 0 ? raw : CONFIG.DEFAULT_NAME;
+    const error  = document.getElementById('nameError');
+    if (!raw) {
+      input.setAttribute('aria-invalid', 'true');
+      if (error) error.textContent = 'なまえを入力してください。';
+      input.focus();
+      return;
+    }
+    input.removeAttribute('aria-invalid');
+    if (error) error.textContent = '';
+    const name   = raw.slice(0, 10);
     G.playerName = name;
     // localStorageに保存
     try { localStorage.setItem(CONFIG.STORAGE_NAME_KEY, name); } catch (_) {}
     showScreen('game');
     Game.newRun();
+  });
+
+  document.getElementById('nameInput').addEventListener('input', () => {
+    document.getElementById('nameInput').removeAttribute('aria-invalid');
+    const error = document.getElementById('nameError');
+    if (error) error.textContent = '';
   });
 
   // 名前入力: Enterキーでも進む
@@ -4682,10 +4705,10 @@ const UI = (() => {
     }
   });
 
-  // もう一度（名前入力スキップ）
+  // もう一度も、名前入力を確認してから開始する。
   document.getElementById('btnAgain').addEventListener('click', () => {
-    showScreen('game');
-    Game.newRun();
+    showScreen('name');
+    document.getElementById('nameInput').focus();
   });
 
   // ホームへ
