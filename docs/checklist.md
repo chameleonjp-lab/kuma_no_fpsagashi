@@ -29,7 +29,7 @@
 | console.log が残っていない（warnはSupabase失敗時のみ許容） | OK | [G] console.log実呼び出しゼロ・console.warnは送信失敗の1件のみ |
 | シェア文にURLが含まれる | OK | [R] doShareがtext+location.hrefを付与（共有/コピー両経路） |
 | ランキング0件でも表示が壊れない | OK | [D] 0件は「まだ記録がありません」 |
-| 名前未入力でも既定値「ななしのくま」で進行 | OK | [R] btnGoでtrim後空なら CONFIG.DEFAULT_NAME |
+| 名前未入力では開始できない | OK | [R] btnGoで空欄を拒否し、名前エラーを表示 |
 | 全操作ボタンが44×44px以上 | OK | [G] dpad48/攻撃64×80/足踏み・メニュー44/使う置く44/投擲56/タブ44/リンク44 |
 | tools/core-harness.mjs 全テスト合格 | OK | [H] data/mono/formulas/items/gen/bot 合格569 不合格0 スキップ0（bot最深B22-29F） |
 
