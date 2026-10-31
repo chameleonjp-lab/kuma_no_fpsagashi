@@ -1253,7 +1253,7 @@ body {
     <div class="home-btns">
       <button id="btnStart" class="btn btn-primary">ゲーム開始</button>
       <button id="btnRule" class="btn">ルール説明</button>
-      <button id="btnShareGame" class="btn">ゲームをシェア</button>
+      <button id="btnShareGame" class="btn common-x-share">Xでシェア</button><a class="common-ranking-link" href="https://chameleonjp-lab.github.io/chameleonjp_lab/ranking.html?game=kuma_no_fpsagashi">ランキング</a>
       <a id="linkLab" class="btn-link" href="">▷ 実験場へ</a>
     </div>
   </section>
@@ -1346,7 +1346,7 @@ body {
 
     <div class="result-btns">
       <button id="btnAgain" class="btn btn-primary">もう一度</button>
-      <button id="btnShareResult" class="btn" data-share-text="">結果をシェア</button>
+      <button id="btnShareResult" class="btn common-x-share" data-share-text="">Xでシェア</button><a class="common-ranking-link" href="https://chameleonjp-lab.github.io/chameleonjp_lab/ranking.html?game=kuma_no_fpsagashi">ランキング</a>
       <button id="btnHome" class="btn">ホームへ</button>
       <a id="linkLabResult" class="btn-link" href="">▷ 実験場へ</a>
     </div>
@@ -1467,6 +1467,63 @@ body {
   <div class="rotate-text">縦にしてください</div>
 </div>
 
+<style>
+button.common-x-share { background:#000 !important; color:#fff !important; border:1px solid #555; white-space:normal; overflow-wrap:anywhere; min-height:44px; padding:12px 16px; line-height:1.4; }
+.common-ranking-link { display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; min-height:44px; padding:12px 16px; border:1px solid currentColor; border-radius:10px; color:inherit; text-decoration:none; white-space:normal; overflow-wrap:anywhere; line-height:1.4; }
+#commonShareFallback { box-sizing:border-box; width:min(92vw,32rem); max-height:85dvh; overflow:auto; border:1px solid #777; border-radius:12px; padding:20px; background:#fff; color:#111; }
+#commonShareFallback::backdrop { background:#0009; }
+#commonShareFallback textarea { box-sizing:border-box; width:100%; min-height:160px; padding:10px; font:16px/1.5 sans-serif; color:#111; background:#fff; user-select:text; -webkit-user-select:text; }
+#commonShareFallback button { min-height:44px; margin:6px; padding:10px 16px; white-space:normal; color:#fff; background:#222; }
+</style>
+<dialog id="commonShareFallback" aria-labelledby="commonShareHeading">
+  <h2 id="commonShareHeading">共有文をコピー</h2>
+  <p>Xを開けない場合は、本文とURLをコピーして投稿できます。</p>
+  <textarea id="commonShareText" readonly aria-label="共有する本文とURL"></textarea>
+  <p id="commonShareStatus" role="status" aria-live="polite"></p>
+  <button id="commonShareCopy" type="button">コピー</button>
+  <button id="commonShareClose" type="button">閉じる</button>
+</dialog>
+<script>
+(() => {
+  'use strict';
+  const dialog = document.getElementById('commonShareFallback');
+  const field = document.getElementById('commonShareText');
+  const status = document.getElementById('commonShareStatus');
+  window.openGameShareX = (text) => {
+    const body = String(text);
+    const intent = new URL('https://x.com/intent/post');
+    intent.searchParams.set('text', body);
+    let popup;
+    try {
+      popup = window.open('', '_blank');
+      if (popup) {
+        popup.opener = null;
+        popup.location.replace(intent.href);
+        return;
+      }
+    } catch (_) {
+      try { if (popup) popup.close(); } catch (_) {}
+    }
+    field.value = body;
+    status.textContent = '';
+    if (!dialog.open) dialog.showModal();
+    field.focus();
+    field.select();
+  };
+  document.getElementById('commonShareCopy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(field.value);
+      status.textContent = 'コピーしました。投稿はXで確認してください。';
+    } catch (_) {
+      field.focus();
+      field.select();
+      status.textContent = '本文を選択して手動でコピーしてください。';
+    }
+  });
+  document.getElementById('commonShareClose').addEventListener('click', () => dialog.close());
+})();
+</script>
+
 <script>
 'use strict';
 
@@ -1564,8 +1621,8 @@ const CONFIG = Object.freeze({
 
   // ランキング（§9.4）
   RPC_TIMEOUT_MS:  8000,
-  RANK_FETCH_LIMIT:100,
-  RANK_SHOW:       10,
+  RANK_FETCH_LIMIT:30,
+  RANK_SHOW:       30,
 });
 
 // ==== SECTION: DATA ====
@@ -4627,27 +4684,11 @@ const UI = (() => {
 
   /**
    * シェアボタン共通処理。
-   * Web Share API → navigator.clipboard の順でフォールバック。
+   * Xの投稿画面を開き、開けなければコピー欄を表示する。
    * @param {string} shareText - シェアするテキスト
    * @param {HTMLButtonElement} btn - ボタン要素（文言を一時的に変更するため）
    */
-  async function doShare(shareText, btn) {
-    const url      = CONFIG.GAME_URL;
-    const fullText = `${shareText}\n${url}`;
-    try {
-      if (navigator.share) {
-        await navigator.share({ text: shareText, url });
-        return;
-      }
-      // フォールバック: クリップボードコピー
-      await navigator.clipboard.writeText(fullText);
-      const orig = btn.textContent;
-      btn.textContent = 'コピーしました';
-      setTimeout(() => { btn.textContent = orig; }, 1800);
-    } catch (_) {
-      // 失敗は握りつぶす
-    }
-  }
+  function doShare(shareText, btn) { window.openGameShareX(`${shareText}\n${CONFIG.GAME_URL}`); }
 
   // ---------- イベントハンドラ ----------
 
@@ -4668,7 +4709,7 @@ const UI = (() => {
 
   // ゲームをシェア
   document.getElementById('btnShareGame').addEventListener('click', function() {
-    doShare('『熊のFP探し』FPを探して底なしダンジョンへ。どこまで潜れる？', this);
+    doShare('『熊のFP探し』相棒のFPを探して地下60階へ。装備と食料を使い、一歩ずつ進む探索ゲーム。', this);
   });
 
   // 名前入力: 冒険に出る。空欄は既定値へ置き換えず、開始を止める。
@@ -4893,7 +4934,7 @@ const Ranking = (() => {
 
   /**
    * ランキングを取得して描画し、送信済みなら「あなた：◯位」を算出する（§9.4）。
-   * 取得は CONFIG.RANK_FETCH_LIMIT(100) 件、表示は上位 CONFIG.RANK_SHOW(10) 件。
+   * 取得は CONFIG.RANK_FETCH_LIMIT(30) 件、表示は上位 CONFIG.RANK_SHOW(30) 件。
    * 失敗してもゲーム進行を妨げない。
    * @returns {Promise<void>}
    */
@@ -4916,23 +4957,8 @@ const Ranking = (() => {
       });
       renderRanking(rows);
 
-      // 「あなた：◯位」：送信済みのときのみ算出（§9.4・近似実装はdecisions.md）
-      if (hasSubmitted) {
-        const list = Array.isArray(rows) ? rows : [];
-        const mine = list.find((r) => (r.display_name ?? r.name ?? '') === playerName);
-        if (!mine) {
-          // 100件取得に自分が無い＝圏外
-          elYour.textContent = 'あなた：100位圏外';
-        } else {
-          const rank = mine.rank_no ?? mine.rank;
-          if (rank > CONFIG.RANK_SHOW) {
-            elYour.textContent = `あなた：${rank}位`;
-          } else {
-            // 上位表示内に出ているので欄外表示は不要
-            elYour.textContent = '';
-          }
-        }
-      }
+      // 上位一覧から圏外の本人順位は推測しない。
+      elYour.textContent = '';
     } catch (e) {
       // §9.4: 取得失敗は一覧欄に表示し、進行は妨げない
       elBox.textContent = '';
