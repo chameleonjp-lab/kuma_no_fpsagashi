@@ -3444,7 +3444,8 @@ const AudioFX = (() => {
     for (const voice of [...voices]) {
       voices.delete(voice);
       try { voice.osc.stop(); } catch (_) {}
-      try { voice.osc.disconnect(); voice.gain.disconnect(); } catch (_) {}
+      try { voice.osc.disconnect(); } catch (_) {}
+      try { voice.gain?.disconnect(); } catch (_) {}
     }
   }
   function persist() { try { localStorage.setItem('kuma_no_fpsagashi:audio:v1',JSON.stringify(settings)); } catch (_) {} }
@@ -3453,13 +3454,15 @@ const AudioFX = (() => {
   function unlock() {
     if (!settings.enabled || !settings.volume || document.hidden) return;
     try {
+      if (ctx?.state === 'closed') { stop(); ctx = null; last = -Infinity; }
       if (!ctx) {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         if (!AudioContext) return;
         ctx = new AudioContext();
-        ctx.addEventListener('statechange', () => { if (ctx.state !== 'running') stop(); });
+        const created = ctx;
+        ctx.addEventListener('statechange', () => { if (ctx === created && created.state !== 'running') stop(); });
       }
-      if (ctx.state !== 'running') Promise.resolve(ctx.resume()).catch(() => {});
+      if (ctx.state !== 'running') { stop(); Promise.resolve(ctx.resume()).catch(() => {}); }
     } catch (_) {} // Never gate game actions on audio initialization.
   }
   const cues = {start:[523,0.16], attack:[220,0.07], hurt:[110,0.12], descend:[659,0.12], result:[330,0.22], clear:[784,0.3], menu:[440,0.04]};
@@ -3471,15 +3474,16 @@ const AudioFX = (() => {
     let osc, gain;
     try {
       const [frequency,duration] = cues[kind];
-      osc = ctx.createOscillator(); gain = ctx.createGain();
-      const voice = {osc,gain}; voices.add(voice);
+      osc = ctx.createOscillator();
+      const voice = {osc,gain:null}; voices.add(voice);
+      gain = ctx.createGain(); voice.gain = gain;
       osc.type = 'sine'; osc.frequency.setValueAtTime(frequency,ctx.currentTime);
       gain.gain.setValueAtTime(Math.max(0.0001,settings.volume*0.12),ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+duration);
       osc.connect(gain); gain.connect(ctx.destination);
-      osc.onended = () => { voices.delete(voice); try { osc.disconnect(); gain.disconnect(); } catch (_) {} };
+      osc.onended = () => { voices.delete(voice); try { osc.disconnect(); } catch (_) {} try { gain.disconnect(); } catch (_) {} };
       osc.start(); osc.stop(ctx.currentTime+duration);
-    } catch (_) { stop(); try { osc?.disconnect(); gain?.disconnect(); } catch (_) {} }
+    } catch (_) { stop(); }
   }
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); });
   return {settings,setEnabled,setVolume,unlock,play,stop,activeCount:()=>voices.size};
@@ -3495,29 +3499,41 @@ const PlayReceipt = (() => {
   const valid = p => p && p.game === CONFIG.GAME_SLUG &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(p.id) &&
     typeof p.name === 'string' && p.name.length <= 10 && p.name === p.name.trim() &&
-    p.eligible === Boolean(p.name) && typeof p.version === 'string' &&
+    p.eligible === Boolean(p.name) && (p.eligible ? p.status !== 'anonymous' : p.status === 'anonymous') && typeof p.version === 'string' &&
     Number.isInteger(p.score) && p.score >= 1 && p.score <= 60 &&
     ['pending','sending','failed','sent','anonymous'].includes(p.status);
+  const same = (a,b) => a && b && ['id','game','name','eligible','version','score'].every(k=>a[k]===b[k]);
+  const playing = p => p && p.status === 'playing' && p.score === null && valid({...p,score:1,status:p.eligible?'pending':'anonymous'});
   function save(p) {
+    p.persisted = false;
     if (valid(p)) memory.set(p.id, p);
     try {
       let legacy = null, pointerWritable = true;
       const legacyRaw = localStorage.getItem(key);
       try { legacy = JSON.parse(legacyRaw); } catch (_) { pointerWritable = false; }
-      if (legacyRaw && !valid(legacy) && !(legacy?.game === CONFIG.GAME_SLUG && legacy.status === 'playing' && legacy.score === null)) pointerWritable = false;
-      if (valid(legacy) && !localStorage.getItem(archivePrefix + legacy.id)) {
-        localStorage.setItem(archivePrefix + legacy.id, JSON.stringify(legacy));
+      if (legacyRaw && !valid(legacy) && !playing(legacy)) pointerWritable = false;
+      if (valid(legacy)) {
+        const archivedRaw = localStorage.getItem(archivePrefix + legacy.id);
+        if (archivedRaw) {
+          try { if (!valid(JSON.parse(archivedRaw)) || !same(JSON.parse(archivedRaw),legacy)) pointerWritable = false; }
+          catch (_) { pointerWritable = false; }
+        } else {
+          localStorage.setItem(archivePrefix + legacy.id, legacyRaw);
+          if (localStorage.getItem(archivePrefix + legacy.id) !== legacyRaw) pointerWritable = false;
+        }
       }
       if (valid(p)) {
         const storedRaw = localStorage.getItem(archivePrefix + p.id);
         const stored = JSON.parse(storedRaw);
         // Same UUID with corrupt/different payload is not safe to replace.
-        if (storedRaw && (!valid(stored) || stored.name !== p.name || stored.score !== p.score || stored.version !== p.version)) throw new Error('Receipt collision');
+        if (storedRaw && (!valid(stored) || !same(stored,p))) throw new Error('Receipt collision');
         if (stored?.status === 'sent') p.status = 'sent';
+        const wire = JSON.stringify({...p, persisted:true});
+        localStorage.setItem(archivePrefix + p.id, wire);
+        if (localStorage.getItem(archivePrefix + p.id) !== wire) throw new Error('Receipt save unverified');
         p.persisted = true;
-        localStorage.setItem(archivePrefix + p.id, JSON.stringify(p));
       }
-      if (p === current && pointerWritable) localStorage.setItem(key, JSON.stringify(p));
+      if (p === current && pointerWritable && (valid(p) || playing(p))) localStorage.setItem(key, JSON.stringify(p));
     } catch (_) { p.persisted = false; }
   }
   function start(name) {
@@ -3525,7 +3541,7 @@ const PlayReceipt = (() => {
     // UUID creation can fail on older/insecure browsers; game remains playable,
     // but no unsafe non-idempotent send is attempted.
     let id = null;
-    try { id = crypto.randomUUID(); } catch (_) {}
+    try { id = crypto.randomUUID(); if (memory.has(id) || localStorage.getItem(archivePrefix+id)) id = null; } catch (_) {}
     current = {id, name: normalized, eligible: Boolean(normalized), game: CONFIG.GAME_SLUG,
       version: CONFIG.CLIENT_VERSION, score: null, status: 'playing'};
     save(current);
@@ -3562,12 +3578,14 @@ const PlayReceipt = (() => {
       }
     } catch (_) {} // Storage may be unavailable: the live result still works.
     for (const [id,p] of memory) {
-      if (results.get(id)?.status === 'sent') p.status = 'sent';
+      const disk = results.get(id);
+      if (disk && !same(disk,p)) { p.persisted = false; continue; }
+      if (disk?.status === 'sent') p.status = 'sent';
       results.set(id,p);
     }
     return [...results.values()];
   }
-  return {start, finish, setStatus, restore, valid, savedResults};
+  return {start, finish, setStatus, restore, valid, savedResults, save};
 })();
 
 // ==== SECTION: GAME-STATE ====
@@ -5200,6 +5218,7 @@ const Ranking = (() => {
         p_limit: CONFIG.RANK_FETCH_LIMIT,
       });
       if (request !== rankingRequest || active !== play) return;
+      if (!Array.isArray(rows) || rows.some(r => !r || !Number.isSafeInteger(r.rank_no ?? r.rank) || (r.rank_no ?? r.rank) < 1 || typeof (r.display_name ?? r.name) !== 'string' || !Number.isSafeInteger(r.best_score ?? r.first_score ?? r.score ?? r.bestScore ?? r.firstScore))) throw new Error('Malformed ranking');
       renderRanking(rows);
 
       // 上位一覧から圏外の本人順位は推測しない。
@@ -5232,6 +5251,7 @@ const Ranking = (() => {
     elSubmit.classList.add('hidden');
     elRetry.classList.add('hidden');
     const storageWarning = play?.persisted === false ? T.text(' 端末に保存できません。このページを閉じると再送できない場合があります。') : '';
+    if (play?.persisted === false) elRetry.classList.remove('hidden');
     if (!play || !play.eligible) { elStatus.textContent = T.text('名前なしのためランキングには登録しません。') + storageWarning; return; }
     const messages = {pending:'送信待ち', sending:'送信中…', sent:'送信しました', failed:'送信に失敗しました。結果は保持しています。'};
     elStatus.textContent = T.text(messages[play.status] || '送信待ち') + storageWarning;
@@ -5239,19 +5259,25 @@ const Ranking = (() => {
   }
   async function submit() {
     const play = active;
-    if (!play || !play.eligible || play.status === 'sent' || inflight.has(play.id)) return;
+    if (!play || inflight.has(play.id)) return;
+    if (!play.eligible || play.status === 'sent') { PlayReceipt.save(play); renderStatus(play); return; }
     if (!PlayReceipt.valid(play)) {
       PlayReceipt.setStatus(play, 'failed'); renderStatus(play); return;
     }
     inflight.add(play.id);
     PlayReceipt.setStatus(play, 'sending'); renderStatus(play);
+    if (!play.persisted || play.status === 'sent') {
+      if (play.status !== 'sent') PlayReceipt.setStatus(play, 'failed');
+      renderStatus(play); inflight.delete(play.id); return;
+    }
     try {
       const response = await supabaseRpc('submit_score_once_shared_v1', {
         p_submission_id: play.id, p_display_name: play.name,
         p_game_slug: play.game, p_score: play.score, p_client_version: play.version,
       });
-      const receipt = Array.isArray(response) ? response[0] : response;
-      if (receipt?.accepted !== true) throw new Error('Score was not accepted');
+      const keys = ['accepted','result_display_name','result_normalized_name','result_first_score','result_best_score','result_play_count','was_duplicate','is_first_play','is_new_best'];
+      const receipt = Array.isArray(response) && response.length === 1 ? response[0] : null;
+      if (!receipt || Object.keys(receipt).length !== keys.length || keys.some(k=>!Object.hasOwn(receipt,k)) || receipt.accepted !== true || receipt.result_display_name !== play.name || receipt.result_normalized_name !== play.name || !Number.isSafeInteger(receipt.result_first_score) || !Number.isSafeInteger(receipt.result_best_score) || !Number.isSafeInteger(receipt.result_play_count) || receipt.result_play_count < 1 || ['was_duplicate','is_first_play','is_new_best'].some(k=>typeof receipt[k] !== 'boolean')) throw new Error('Score was not accepted');
       PlayReceipt.setStatus(play, 'sent');
       if (active !== play) return;
       renderStatus(play); await loadRanking();

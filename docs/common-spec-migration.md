@@ -135,3 +135,20 @@ iPhone確認手順: ①ホームで15言語・長文と名前欄/設定に触れ
 独立レビューの追加修正: 吹き出しの折返しをIntl.Segmenterのgrapheme単位に変更し、アクセント結合文字・タイ語の結合文字・ZWJ絵文字を幅境界で分断しない。Segmenter未対応ブラウザは文字欠落なくコードポイント単位で表示するが、結合文字の折返し品質は未保証。長文/結合文字/未対応環境の回帰を追加。日本語原文やゲーム処理は変更しない。
 
 最終の小修正: 言語設定ラベル/aria-labelも15言語へ翻訳し、辞書は各352キー（元351＋設定ラベル1）となった。匿名結果でも端末保存失敗を表示する。ローカル回帰49件、既存CORE825件、check-site成功。前記翻訳原票hashは元351キーの記録であり、設定ラベル追加後のindexファイル全体hashとは異なる。
+
+## 2026-11-02 実ブラウザ検証追加（後続）
+
+前記49件/825件とHappyDOMは過去の確認範囲。今回の現head `f6bb7775caa979beede6dc711c64ac4115f58039` を再取得し、公開indexのGit blob `2f6e8a3fbe9351c7f46945fbb86eb7dfae5daff8` と手元一致を確認した。実際には `Ranking.submit` は accepted だけを確認し、`PlayReceipt.save` は保存読み戻しを行わず、保存不可でも送信していた。前回のクライアント対応済み表記はこれらの境界まで確認した意味ではない。
+
+- quota/無言保存失敗で公開送信しない。UUID別既存形式・キーを維持し、全保存文字列読み戻し後だけ送信。同UUID/同payloadで再試行し、guestも再保存できる。旧結果・sent台帳・破損rawを削除しない。
+- normal RPCの1行配列/9列、保存名・正規化名・各値を検証。不確実応答はfailedで残す。signedの旧first/bestは維持。DB未適用・identity・独立30人集計は未完。
+- 壊れたランキング応答を空の正常結果にせずエラー/再試行へ。音の切断例外でも個別nodeを後片付けし、interrupted復帰前に古音を停止。
+- 新 `tools/browser-smoke.cjs` は実Chromium/WebKitで15言語のhome/rules/Canvas/足踏み/全アイテム説明/リタイア結果/ランキング/共有、名前snapshot・guest0・offline/reload・quota同UUID・旧応答・off0・縦横長文を検査する。全ネットワークはlocalhostとSupabase mock以外拒否。CORE自体・正本独り言41行・ID・採点は変更しない。
+- アイテム列挙はテスト専用inventory注入による説明表示確認で、地下60階の実プレイ/入手/全戦闘の受入ではない。実engine成功でもiPhone Safari実機・聴感・母語話者品質・本番RPC成功とは区別する。
+- workflowの既存公開ブランチとpush時のみartifact/deployを維持。Playwrightはテスト用固定1.62.1/標準公開repo CIコンテナのみ、単一HTML公開物に依存を追加しない。既存 `_site` は削除せずstageを停止させる。
+
+現地実行: 58 Node tests・CORE825件・構文検査成功。実ブラウザはローカルsocket制限で起動前失敗し、正規CIで検証する。最終headとCI終端の根拠はPR本文に記録する。現在のCodeberg URLは変更しない。Pages Source/公開移行/origin保存/iPhone/母語/実音は引き続き未確認。
+
+独立レビューで追加した回帰: UUID衝突時に別payloadへsent状態を継承しない。既存archive/memoryと衝突した生成UUIDは再生成せず送信を保留し、元保存行を優先する。不正なplaying形式の旧pointerは保持し、新しい有効archiveだけ独立保存する。
+
+旧pointerと同IDのarchiveが異payload/壊れならpointerを上書きせず、その原文も保持する。archiveがあるだけで旧pointerの保全済みとは判断しない。

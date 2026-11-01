@@ -219,3 +219,6 @@ HUD/操作:
 - 検証: core-harness **822全合格**（deepReachにボスフロア生成=単体boss・撃破でcleared/over・B59は非ボスを追加）。CORE結合テストで B59→B60降下→ボスフロア生成→降り無効→撃破で cleared/over/deepest60 を確認。構文OK・DOM起動 例外なし。
 
 - 2026-10-31: 共通仕様依頼に従いGitHub Pages検証・公開を準備。既存の単一HTMLを維持し、ゲーム処理・DB・保存キー・旧URL切替は変更しない。設定と確認順は common-spec-migration.md。
+
+
+- 2026-11-02: 最新共通仕様の実ブラウザ検証依頼に従い、テスト専用Playwrightを標準CIに限定して追加。旧CLAUDE.mdのNode/npm/音禁止より最新本人依頼を優先するが、公開物は単一indexを維持。CORE/採点/独り言を変更せず、保存読み戻し・RPC受領照合・音cleanupの再現不具合だけ修正する。旧検証はHappyDOM/VMと実engineを区別し、全ダンジョン/実機/本番受入と誤記しない。

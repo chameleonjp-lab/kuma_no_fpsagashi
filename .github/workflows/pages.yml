@@ -15,7 +15,8 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    container: mcr.microsoft.com/playwright:v1.62.1-noble
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,6 +28,9 @@ jobs:
       - run: python3 tools/check-site.py
       - run: node --test tools/*.test.mjs
       - run: node tools/core-harness.mjs
+      - run: npm install --no-save --package-lock=false --ignore-scripts playwright@1.62.1
+      - run: node tools/browser-smoke.cjs
+      - run: BROWSER_ENGINE=webkit node tools/browser-smoke.cjs
       - name: Stage the validated public file
         run: python3 tools/check-site.py --out _site
       - name: Upload this commit's Pages artifact
