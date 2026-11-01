@@ -152,3 +152,5 @@ iPhone確認手順: ①ホームで15言語・長文と名前欄/設定に触れ
 独立レビューで追加した回帰: UUID衝突時に別payloadへsent状態を継承しない。既存archive/memoryと衝突した生成UUIDは再生成せず送信を保留し、元保存行を優先する。不正なplaying形式の旧pointerは保持し、新しい有効archiveだけ独立保存する。
 
 旧pointerと同IDのarchiveが異payload/壊れならpointerを上書きせず、その原文も保持する。archiveがあるだけで旧pointerの保全済みとは判断しない。
+
+初回browser CIの失敗原因: 15言語/全アイテム説明を通過後、履歴一覧の末尾を新しい名前付き結果と仮定したテストが、localStorage列挙順の違いで匿名の別結果を選んだ。テストは実savedResultsのUUIDに対応するbuttonを選択し、失敗/送信済みの表示も確認するよう修正。runtimeの履歴順をテストに合わせて変更せず、retryや送信回数の期待を削除していない。
