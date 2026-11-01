@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import test from 'node:test';
 
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
-const helper=html.match(/<script>\s*(\(\(\) => \{\s*'use strict';\s*const dialog = document\.getElementById\('commonShareFallback'\);[\s\S]*?\}\)\(\);)\s*<\/script>/)?.[1];
+const helper=html.match(/<script>\s*(\(\(\) => \{\s*'use strict';\s*(?:const localText = [^\n]+;\s*)?const dialog = document\.getElementById\('commonShareFallback'\);[\s\S]*?\}\)\(\);)\s*<\/script>/)?.[1];
 assert.ok(helper,'The actual inline share helper must be present');
 function setup(open=()=>null,writeText=async()=>{}) {
   const nodes=new Map();
@@ -55,3 +55,4 @@ test('home and result each have a verified detail link and exact Japanese X labe
   assert.equal((html.match(/>Xでシェア<\/button>/g)||[]).length,2);
   assert.equal((html.match(/class="common-ranking-link" href="https:\/\/chameleonjp-lab.github.io\/chameleonjp_lab\/ranking.html\?game=[^"]+">ランキング<\/a>/g)||[]).length,2);
 });
+
