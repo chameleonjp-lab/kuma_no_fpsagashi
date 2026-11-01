@@ -1250,22 +1250,21 @@ body {
       <span class="title-sub">🐻</span>
     </div>
     <p class="home-story">FP＝ファーストパートナーを探して、熊はダンジョンの奥深くへ潜っていく。</p>
+    <div class="name-form">
+      <label class="name-label" for="nameInput">なまえ（任意・10文字まで）</label>
+      <input id="nameInput" type="text" maxlength="10" autocomplete="nickname" placeholder="なまえを入力" aria-describedby="nameDisclosure nameError">
+      <p id="nameDisclosure">名前を入力すると、名前と記録がランキングに公開されます。空欄でも遊べます。</p>
+      <p id="nameError" role="alert" aria-live="polite"></p>
+    </div>
+    <fieldset class="audio-controls"><legend>音の設定</legend>
+      <label><input type="checkbox" id="audioEnabled"> 効果音</label>
+      <label for="audioVolume">音量</label><input id="audioVolume" type="range" min="0" max="1" step="0.05">
+    </fieldset>
     <div class="home-btns">
       <button id="btnStart" class="btn btn-primary">ゲーム開始</button>
       <button id="btnRule" class="btn">ルール説明</button>
       <button id="btnShareGame" class="btn common-x-share">Xでシェア</button><a class="common-ranking-link" href="https://chameleonjp-lab.github.io/chameleonjp_lab/ranking.html?game=kuma_no_fpsagashi">ランキング</a>
       <a id="linkLab" class="btn-link" href="">▷ 実験場へ</a>
-    </div>
-  </section>
-
-  <!-- 名前入力画面 -->
-  <section id="screenName" class="screen">
-    <p class="name-title">🐻 冒険者のなまえ</p>
-    <div class="name-form">
-      <label class="name-label" for="nameInput">なまえ（1〜10文字）</label>
-      <input id="nameInput" type="text" maxlength="10" autocomplete="nickname" placeholder="なまえを入力" aria-describedby="nameError">
-      <p id="nameError" role="alert" aria-live="polite"></p>
-      <button id="btnGo" class="btn btn-primary">冒険に出る</button>
     </div>
   </section>
 
@@ -3333,6 +3332,145 @@ const Core = {
 
 // ==== CORE-END ====
 
+// ==== SECTION: AUDIO ====
+const AudioFX = (() => {
+  const settings = {enabled:true, volume:0.25};
+  try {
+    const saved = JSON.parse(localStorage.getItem('kuma_no_fpsagashi:audio:v1'));
+    if (typeof saved?.enabled === 'boolean') settings.enabled = saved.enabled;
+    if (typeof saved?.volume === 'number' && Number.isFinite(saved.volume) && saved.volume >= 0 && saved.volume <= 1) settings.volume = saved.volume;
+  } catch (_) {}
+  let ctx = null, last = -Infinity;
+  const voices = new Set();
+  function stop() {
+    for (const voice of [...voices]) {
+      voices.delete(voice);
+      try { voice.osc.stop(); } catch (_) {}
+      try { voice.osc.disconnect(); voice.gain.disconnect(); } catch (_) {}
+    }
+  }
+  function persist() { try { localStorage.setItem('kuma_no_fpsagashi:audio:v1',JSON.stringify(settings)); } catch (_) {} }
+  function setEnabled(value) { settings.enabled = Boolean(value); persist(); if (!settings.enabled) stop(); }
+  function setVolume(value) { if (!Number.isFinite(value)) return; settings.volume = Math.max(0, Math.min(1,value)); persist(); if (!settings.volume) stop(); }
+  function unlock() {
+    if (!settings.enabled || !settings.volume || document.hidden) return;
+    try {
+      if (!ctx) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        ctx = new AudioContext();
+        ctx.addEventListener('statechange', () => { if (ctx.state !== 'running') stop(); });
+      }
+      if (ctx.state !== 'running') Promise.resolve(ctx.resume()).catch(() => {});
+    } catch (_) {} // Never gate game actions on audio initialization.
+  }
+  const cues = {start:[523,0.16], attack:[220,0.07], hurt:[110,0.12], descend:[659,0.12], result:[330,0.22], clear:[784,0.3], menu:[440,0.04]};
+  function play(kind) {
+    if (!settings.enabled || !settings.volume || document.hidden || !ctx || ctx.state !== 'running') return;
+    const now = performance.now();
+    if (now-last < 80 || !cues[kind]) return;
+    last = now; stop(); // One prioritized cue per action, at most one live voice.
+    let osc, gain;
+    try {
+      const [frequency,duration] = cues[kind];
+      osc = ctx.createOscillator(); gain = ctx.createGain();
+      const voice = {osc,gain}; voices.add(voice);
+      osc.type = 'sine'; osc.frequency.setValueAtTime(frequency,ctx.currentTime);
+      gain.gain.setValueAtTime(Math.max(0.0001,settings.volume*0.12),ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+duration);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.onended = () => { voices.delete(voice); try { osc.disconnect(); gain.disconnect(); } catch (_) {} };
+      osc.start(); osc.stop(ctx.currentTime+duration);
+    } catch (_) { stop(); try { osc?.disconnect(); gain?.disconnect(); } catch (_) {} }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); });
+  return {settings,setEnabled,setVolume,unlock,play,stop,activeCount:()=>voices.size};
+})();
+
+// ==== SECTION: PLAY-RECEIPT ====
+// One immutable start snapshot per play; no name-based participant allocation.
+const PlayReceipt = (() => {
+  const key = 'kuma_no_fpsagashi:result-receipt:v1';
+  let current = null;
+  const archivePrefix = key + ':';
+  const memory = new Map();
+  const valid = p => p && p.game === CONFIG.GAME_SLUG &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(p.id) &&
+    typeof p.name === 'string' && p.name.length <= 10 && p.name === p.name.trim() &&
+    p.eligible === Boolean(p.name) && typeof p.version === 'string' &&
+    Number.isInteger(p.score) && p.score >= 1 && p.score <= 60 &&
+    ['pending','sending','failed','sent','anonymous'].includes(p.status);
+  function save(p) {
+    if (valid(p)) memory.set(p.id, p);
+    try {
+      let legacy = null, pointerWritable = true;
+      const legacyRaw = localStorage.getItem(key);
+      try { legacy = JSON.parse(legacyRaw); } catch (_) { pointerWritable = false; }
+      if (valid(legacy) && !localStorage.getItem(archivePrefix + legacy.id)) {
+        localStorage.setItem(archivePrefix + legacy.id, JSON.stringify(legacy));
+      }
+      if (valid(p)) {
+        const storedRaw = localStorage.getItem(archivePrefix + p.id);
+        const stored = JSON.parse(storedRaw);
+        // Same UUID with corrupt/different payload is not safe to replace.
+        if (storedRaw && (!valid(stored) || stored.name !== p.name || stored.score !== p.score || stored.version !== p.version)) throw new Error('Receipt collision');
+        if (stored?.status === 'sent') p.status = 'sent';
+        p.persisted = true;
+        localStorage.setItem(archivePrefix + p.id, JSON.stringify(p));
+      }
+      if (p === current && pointerWritable) localStorage.setItem(key, JSON.stringify(p));
+    } catch (_) { p.persisted = false; }
+  }
+  function start(name) {
+    const normalized = name.trim().slice(0, 10);
+    // UUID creation can fail on older/insecure browsers; game remains playable,
+    // but no unsafe non-idempotent send is attempted.
+    let id = null;
+    try { id = crypto.randomUUID(); } catch (_) {}
+    current = {id, name: normalized, eligible: Boolean(normalized), game: CONFIG.GAME_SLUG,
+      version: CONFIG.CLIENT_VERSION, score: null, status: 'playing'};
+    save(current);
+    return current;
+  }
+  function finish(p, score) {
+    if (!p || p.score !== null) return p;
+    p.score = score;
+    p.status = p.eligible ? 'pending' : 'anonymous';
+    save(p); return p;
+  }
+  function setStatus(p, status) { p.status = status; save(p); }
+  function restore() {
+    if (current) return valid(current) ? current : null;
+    try {
+      const p = JSON.parse(localStorage.getItem(key));
+      if (!valid(p)) return null;
+      if (p.status === 'sending') p.status = 'failed';
+      current = p; return p;
+    } catch (_) { return null; }
+  }
+  function savedResults() {
+    const results = new Map();
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const storageKey = localStorage.key(i);
+        if (storageKey !== key && !storageKey?.startsWith(archivePrefix)) continue;
+        try {
+          const p = JSON.parse(localStorage.getItem(storageKey));
+          if (!valid(p) || (storageKey !== key && storageKey !== archivePrefix + p.id)) continue;
+          if (p.status === 'sending') p.status = 'failed';
+          if (!results.has(p.id) || storageKey !== key) results.set(p.id, p);
+        } catch (_) { /* Keep corrupt bytes untouched; inspect later entries. */ }
+      }
+    } catch (_) {} // Storage may be unavailable: the live result still works.
+    for (const [id,p] of memory) {
+      if (results.get(id)?.status === 'sent') p.status = 'sent';
+      results.set(id,p);
+    }
+    return [...results.values()];
+  }
+  return {start, finish, setStatus, restore, valid, savedResults};
+})();
+
 // ==== SECTION: GAME-STATE ====
 /** グローバル状態オブジェクト（依頼書§11: 状態は1オブジェクトに集約） */
 const G = {
@@ -3352,6 +3490,8 @@ const Game = {
    */
   newRun() {
     G.run = Core.newRun(G.playerName);
+    G.run.receipt = PlayReceipt.start(G.playerName);
+    AudioFX.unlock(); AudioFX.play('start');
     Game.updateVision();
     Log.clear();
     Log.add('ダンジョン B1F にやってきた');
@@ -3421,7 +3561,13 @@ const Game = {
     // 通常入力はゲートを通す。giveup と内部呼び出し（眠り）は通す
     if (!internal && action.type !== 'giveup' && !Game.canInput()) return;
 
+    AudioFX.unlock();
     const res = Core.act(run, action);
+    const cue = run.over ? (run.cleared ? 'clear' : 'result')
+      : res.events.some(e => e.t === 'fx' && e.kind === 'bearHit') ? 'hurt'
+      : res.events.some(e => e.t === 'fx' && e.kind === 'attack') ? 'attack'
+      : res.events.some(e => e.t === 'descended') ? 'descend' : null;
+    if (cue) AudioFX.play(cue);
     for (const ev of res.events) {
       if (ev.t === 'msg') {
         Log.add(ev.text);
@@ -3511,7 +3657,7 @@ const Game = {
       UI.showScreen('result');
       // 結果表示直後の連打が「もう一度/ホーム/実験場」を誤爆しないよう一時的にタップ遮断
       UI.guardTaps(run.cleared ? 600 : 3000); // クリア時はエンディングで間を取ったので短く
-      Ranking.onResultShown(run.deepest, run.name);
+      Ranking.onResultShown(run.deepest, run.name, run.receipt);
     };
     if (run.cleared) {
       UI.showEnding(toResult); // 真エンディング演出（暗転→3秒→結果を見る）→ 結果画面へ
@@ -4604,6 +4750,7 @@ const UI = (() => {
     if (target) target.classList.add('active');
     G.screen = name;
     // ゲーム画面へ遷移時はキャンバスリサイズ
+    if (name === 'home') renderSavedResults();
     if (name === 'game') {
       // 次フレームでリサイズ（レイアウト確定後）
       requestAnimationFrame(() => Render.resize());
@@ -4693,9 +4840,7 @@ const UI = (() => {
   // ---------- イベントハンドラ ----------
 
   // ゲーム開始ボタン
-  document.getElementById('btnStart').addEventListener('click', () => {
-    showScreen('name');
-  });
+  document.getElementById('btnStart').addEventListener('click', startAdventure);
 
   // ルール説明ボタン
   document.getElementById('btnRule').addEventListener('click', () => {
@@ -4712,26 +4857,15 @@ const UI = (() => {
     doShare('『熊のFP探し』相棒のFPを探して地下60階へ。装備と食料を使い、一歩ずつ進む探索ゲーム。', this);
   });
 
-  // 名前入力: 冒険に出る。空欄は既定値へ置き換えず、開始を止める。
-  document.getElementById('btnGo').addEventListener('click', () => {
-    const input  = document.getElementById('nameInput');
-    const raw    = input.value.trim();
-    const error  = document.getElementById('nameError');
-    if (!raw) {
-      input.setAttribute('aria-invalid', 'true');
-      if (error) error.textContent = 'なまえを入力してください。';
-      input.focus();
-      return;
-    }
-    input.removeAttribute('aria-invalid');
-    if (error) error.textContent = '';
-    const name   = raw.slice(0, 10);
+  // Capture voluntary participation before play, not when the result arrives.
+  function startAdventure() {
+    const input = document.getElementById('nameInput');
+    const name = input.value.trim().slice(0, 10);
     G.playerName = name;
-    // localStorageに保存
     try { localStorage.setItem(CONFIG.STORAGE_NAME_KEY, name); } catch (_) {}
     showScreen('game');
     Game.newRun();
-  });
+  }
 
   document.getElementById('nameInput').addEventListener('input', () => {
     document.getElementById('nameInput').removeAttribute('aria-invalid');
@@ -4741,14 +4875,15 @@ const UI = (() => {
 
   // 名前入力: Enterキーでも進む
   document.getElementById('nameInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      document.getElementById('btnGo').click();
+    if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
+      e.preventDefault?.();
+      document.getElementById('btnStart').click();
     }
   });
 
   // もう一度も、名前入力を確認してから開始する。
   document.getElementById('btnAgain').addEventListener('click', () => {
-    showScreen('name');
+    showScreen('home');
     document.getElementById('nameInput').focus();
   });
 
@@ -4765,6 +4900,7 @@ const UI = (() => {
 
   // メニューボタン（ゲーム画面）
   document.getElementById('btnMenu').addEventListener('click', () => {
+    AudioFX.unlock(); AudioFX.play('menu');
     Menu.open();
   });
 
@@ -4830,12 +4966,9 @@ const UI = (() => {
  * - 例外は try/catch で隔離し、結果画面の進行（もう一度・ホーム・シェア）を止めない（§11）。
  */
 const Ranking = (() => {
-  // ---- モジュール状態 ----
-  let finalScore  = 0;     // 今回プレイの最深到達階
-  let playerName  = '';    // 今回プレイのプレイヤー名（送信値・自分の行判定に使用）
-  let hasSubmitted = false; // 送信成功済みか（成功後は再送防止）
-  let submitting  = false; // 送信処理の進行中フラグ（二重送信防止）
-
+  let active = null;
+  let rankingRequest = 0;
+  const inflight = new Set();
   // ---- DOM 参照（結果画面の固定要素） ----
   const elStatus  = document.getElementById('submitStatus');
   const elSubmit  = document.getElementById('btnSubmitScore');
@@ -4910,8 +5043,7 @@ const Ranking = (() => {
 
       const row = document.createElement('div');
       row.className = 'rank-row';
-      // 自分の行を強調（同名は近似。decisions.md）
-      if (hasSubmitted && name === playerName) row.classList.add('is-me');
+      // Names alone cannot establish participant identity; no guessed self highlight.
 
       const noEl = document.createElement('span');
       noEl.className = 'rank-no';
@@ -4939,6 +5071,8 @@ const Ranking = (() => {
    * @returns {Promise<void>}
    */
   async function loadRanking() {
+    const request = ++rankingRequest;
+    const play = active;
     // 読み込み中表示（タイトルは renderRanking 側で再生成するため簡易表示）
     elBox.textContent = '';
     const title = document.createElement('div');
@@ -4955,11 +5089,13 @@ const Ranking = (() => {
         p_game_slug: CONFIG.GAME_SLUG,
         p_limit: CONFIG.RANK_FETCH_LIMIT,
       });
+      if (request !== rankingRequest || active !== play) return;
       renderRanking(rows);
 
       // 上位一覧から圏外の本人順位は推測しない。
       elYour.textContent = '';
     } catch (e) {
+      if (request !== rankingRequest || active !== play) return;
       // §9.4: 取得失敗は一覧欄に表示し、進行は妨げない
       elBox.textContent = '';
       const t2 = document.createElement('div');
@@ -4970,6 +5106,10 @@ const Ranking = (() => {
       err.className = 'rank-empty';
       err.textContent = 'ランキングを取得できませんでした';
       elBox.appendChild(err);
+      const retry = document.createElement('button');
+      retry.className = 'btn'; retry.textContent = '再試行';
+      retry.addEventListener('click', () => { loadRanking(); });
+      elBox.appendChild(retry);
     }
   }
 
@@ -4978,56 +5118,47 @@ const Ranking = (() => {
    * 二重送信防止：送信中・送信成功済みは弾く。成功後はボタンを無効のまま据え置く（§9.3）。
    * @returns {Promise<void>}
    */
-  async function submit() {
-    if (hasSubmitted || submitting) return; // 二重送信防止
-    submitting = true;
-    elSubmit.disabled = true;
-    elStatus.textContent = '送信中…';
-    elRetry.classList.add('hidden');
-
-    try {
-      await supabaseRpc('submit_score', {
-        p_display_name: playerName,
-        p_game_slug:    CONFIG.GAME_SLUG,
-        p_score:        finalScore,
-        p_client_version: CONFIG.CLIENT_VERSION,
-      });
-      hasSubmitted = true;
-      elStatus.textContent = '送信しました';
-      // 成功後は再送防止のためボタンは disabled のまま据え置く
-      await loadRanking(); // 最新化＋「あなた：◯位」算出
-    } catch (e) {
-      // 失敗：状態表示＋再試行ボタン。hasSubmitted は false のまま＝再実行可
-      elStatus.textContent = '送信に失敗しました';
-      elRetry.classList.remove('hidden');
-      // 運用時のエラー可視化（console.log は禁止・warn のみ許容。decisions.md）
-      console.warn('submit_score failed:', e);
-    } finally {
-      submitting = false;
-    }
-  }
-
-  /**
-   * 結果画面を表示した時の入口（Game.endRun から呼ばれる）。
-   * v2: ゲーム完了と同時にスコアを自動送信する（手動「ランキングに登録」ボタンは廃止）。
-   * 二重送信防止・送信中/成功/失敗表示・失敗時のみ再試行 は維持。名前は開始時入力済み（既定名あり）。
-   * @param {number} score - 最深到達階（run.deepest）
-   * @param {string} name - プレイヤー名（run.name）
-   */
-  function onResultShown(score, name) {
-    finalScore   = score;
-    playerName   = name;
-    hasSubmitted = false;
-    submitting   = false;
-
-    // 手動送信ボタンは隠す（自動送信）。再試行は失敗時のみ出す
+  function renderStatus(play) {
     elSubmit.classList.add('hidden');
     elRetry.classList.add('hidden');
-    elYour.textContent = '';
-    elStatus.textContent = '';
+    if (!play || !play.eligible) { elStatus.textContent = '名前なしのためランキングには登録しません。'; return; }
+    const messages = {pending:'送信待ち', sending:'送信中…', sent:'送信しました', failed:'送信に失敗しました。結果は保持しています。'};
+    elStatus.textContent = (messages[play.status] || '送信待ち') + (play.persisted === false ? ' 端末に保存できません。このページを閉じると再送できない場合があります。' : '');
+    if (play.status === 'failed') elRetry.classList.remove('hidden');
+  }
+  async function submit() {
+    const play = active;
+    if (!play || !play.eligible || play.status === 'sent' || inflight.has(play.id)) return;
+    if (!PlayReceipt.valid(play)) {
+      PlayReceipt.setStatus(play, 'failed'); renderStatus(play); return;
+    }
+    inflight.add(play.id);
+    PlayReceipt.setStatus(play, 'sending'); renderStatus(play);
+    try {
+      const response = await supabaseRpc('submit_score_once_shared_v1', {
+        p_submission_id: play.id, p_display_name: play.name,
+        p_game_slug: play.game, p_score: play.score, p_client_version: play.version,
+      });
+      const receipt = Array.isArray(response) ? response[0] : response;
+      if (receipt?.accepted !== true) throw new Error('Score was not accepted');
+      PlayReceipt.setStatus(play, 'sent');
+      if (active !== play) return;
+      renderStatus(play); await loadRanking();
+    } catch (_) {
+      PlayReceipt.setStatus(play, 'failed');
+      if (active === play) renderStatus(play);
+    } finally { inflight.delete(play.id); }
+  }
 
-    // ゲーム完了と同時に自動送信。失敗してもゲーム進行（もう一度/ホーム/シェア）は妨げない。
-    submit().catch(() => {});
+  function onResultShown(score, name, play) {
+    // Without an actual start snapshot, never infer consent from a later name.
+    active = play || null;
+    if (active) PlayReceipt.finish(active, score);
+    ++rankingRequest;
+    elYour.textContent = '';
+    renderStatus(active);
+    loadRanking(); // Also available to anonymous players and after failed submits.
+    if (active?.eligible && active.status === 'pending') submit();
   }
 
   // ---- 配線（SUPABASEセクション内に閉じる） ----
@@ -5037,6 +5168,28 @@ const Ranking = (() => {
   return { onResultShown, submit, loadRanking, supabaseRpc };
 })();
 
+function renderSavedResults() {
+  let box = document.getElementById('savedResults');
+  if (!box) {
+    box = document.createElement('div'); box.id = 'savedResults';
+    document.getElementById('screenHome').appendChild(box);
+  }
+  box.textContent = '';
+  for (const restored of PlayReceipt.savedResults()) {
+    const resume = document.createElement('button');
+    resume.className = 'btn'; resume.textContent = `保存した結果 B${restored.score}F（${restored.status === 'sent' ? '送信済み' : restored.eligible ? '未送信' : '名前なし'}）`;
+    resume.addEventListener('click', () => {
+      document.getElementById('resultScore').textContent = `B${restored.score}F`;
+      document.getElementById('resultMsg').textContent = '前回の確定結果';
+      document.getElementById('btnShareResult').dataset.shareText = `『熊のFP探し』B${restored.score}Fまで潜った！`;
+      UI.showScreen('result');
+      Ranking.onResultShown(restored.score, restored.name, restored);
+    });
+    box.appendChild(resume);
+  }
+
+}
+
 // ==== SECTION: BOOT ====
 /**
  * 初期化処理。
@@ -5045,6 +5198,13 @@ const Ranking = (() => {
   // 実験場URLを設定
   document.getElementById('linkLab').href       = CONFIG.LAB_URL;
   document.getElementById('linkLabResult').href = CONFIG.LAB_URL;
+
+  const enabled = document.getElementById('audioEnabled');
+  const volume = document.getElementById('audioVolume');
+  enabled.checked = AudioFX.settings.enabled; volume.value = AudioFX.settings.volume;
+  enabled.addEventListener('change', () => { AudioFX.setEnabled(enabled.checked); AudioFX.unlock(); });
+  volume.addEventListener('input', () => { AudioFX.setVolume(Number(volume.value)); AudioFX.unlock(); });
+  window.addEventListener('pagehide', AudioFX.stop);
 
   // localStorageから前回の名前を復元
   try {
@@ -5056,7 +5216,6 @@ const Ranking = (() => {
 
   // ホーム画面を表示
   UI.showScreen('home');
-
   // スマホ操作抑止（仕様§3）
   // ジェスチャースタート（ピンチズーム等）を抑止
   document.addEventListener('gesturestart', (e) => { e.preventDefault(); }, { passive: false });
@@ -5085,3 +5244,4 @@ const Ranking = (() => {
 </script>
 </body>
 </html>
+

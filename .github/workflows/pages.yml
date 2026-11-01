@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 tools/check-site.py
-      - run: node tools/share.test.mjs
+      - run: node --test tools/*.test.mjs
       - run: node tools/core-harness.mjs
       - name: Stage the validated public file
         run: python3 tools/check-site.py --out _site
@@ -65,3 +65,4 @@ jobs:
       - name: Deploy only the artifact from this validated commit
         id: deployment
         uses: actions/deploy-pages@v4
+
