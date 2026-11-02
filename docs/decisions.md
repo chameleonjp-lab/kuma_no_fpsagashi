@@ -217,3 +217,11 @@ HUD/操作:
 - 【真エンディング演出】`endRun` で `run.cleared` のとき `UI.showEnding(onDone)` を呼ぶ。`#endingScreen`（z-index1000・完全な黒で全UI/HUD/キャンバスを被覆）に依頼の6行メッセージ（「ファースパートナー」表記は依頼者の意図どおり原文保持）を表示→3秒後に「結果を見る」をフェードイン（出現前は pointer-events:none で先走りタップ防止）→押下でオーバーレイを閉じ結果画面へ。二重発火ガード・prefers-reduced-motion対応・safe-area対応・iPhone SEで横スクロールなし（最長行は nowrap、<360pxは折返し）。音声なし。
 - 結果画面の文言/シェアもクリア用に分岐（「最果てB60Fの主をたおした…！」「ついに最果てB60Fを制覇！」）。スコアは B60F、ランキング自動送信は従来どおり（ボタンで結果遷移後に onResultShown）。「もう一度」は newRun が cleared=false に戻すため通常どおり。
 - 検証: core-harness **822全合格**（deepReachにボスフロア生成=単体boss・撃破でcleared/over・B59は非ボスを追加）。CORE結合テストで B59→B60降下→ボスフロア生成→降り無効→撃破で cleared/over/deepest60 を確認。構文OK・DOM起動 例外なし。
+
+- 2026-10-31: 共通仕様依頼に従いGitHub Pages検証・公開を準備。既存の単一HTMLを維持し、ゲーム処理・DB・保存キー・旧URL切替は変更しない。設定と確認順は common-spec-migration.md。
+
+
+- 2026-11-02: 最新共通仕様の実ブラウザ検証依頼に従い、テスト専用Playwrightを標準CIに限定して追加。旧CLAUDE.mdのNode/npm/音禁止より最新本人依頼を優先するが、公開物は単一indexを維持。CORE/採点/独り言を変更せず、保存読み戻し・RPC受領照合・音cleanupの再現不具合だけ修正する。旧検証はHappyDOM/VMと実engineを区別し、全ダンジョン/実機/本番受入と誤記しない。
+
+
+- 2026-11-02 09:49 JST: 共通仕様§5/12の通常RPC ACK検査をsigned int4/現登録desc方向に合わせた。合法first0/負履歴は維持、別名・識別・採点・DBの変更なし。不可能なACKでは同じUUIDの再送を保持する。
