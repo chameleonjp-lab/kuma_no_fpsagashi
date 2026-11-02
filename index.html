@@ -5277,7 +5277,7 @@ const Ranking = (() => {
       });
       const keys = ['accepted','result_display_name','result_normalized_name','result_first_score','result_best_score','result_play_count','was_duplicate','is_first_play','is_new_best'];
       const receipt = Array.isArray(response) && response.length === 1 ? response[0] : null;
-      if (!receipt || Object.keys(receipt).length !== keys.length || keys.some(k=>!Object.hasOwn(receipt,k)) || receipt.accepted !== true || receipt.result_display_name !== play.name || receipt.result_normalized_name !== play.name || !Number.isSafeInteger(receipt.result_first_score) || !Number.isSafeInteger(receipt.result_best_score) || !Number.isSafeInteger(receipt.result_play_count) || receipt.result_play_count < 1 || ['was_duplicate','is_first_play','is_new_best'].some(k=>typeof receipt[k] !== 'boolean')) throw new Error('Score was not accepted');
+      if (!receipt || Object.keys(receipt).length !== keys.length || keys.some(k=>!Object.hasOwn(receipt,k)) || receipt.accepted !== true || receipt.result_display_name !== play.name || receipt.result_normalized_name !== play.name || !Number.isSafeInteger(receipt.result_first_score) || !Number.isSafeInteger(receipt.result_best_score) || !Number.isSafeInteger(receipt.result_play_count) || receipt.result_play_count < 1 || receipt.result_play_count > 2147483647 || receipt.result_first_score < -2147483648 || receipt.result_first_score > 2147483647 || receipt.result_best_score < -2147483648 || receipt.result_best_score > 2147483647 || receipt.result_best_score < play.score || receipt.result_best_score < receipt.result_first_score || ['was_duplicate','is_first_play','is_new_best'].some(k=>typeof receipt[k] !== 'boolean')) throw new Error('Score was not accepted');
       PlayReceipt.setStatus(play, 'sent');
       if (active !== play) return;
       renderStatus(play); await loadRanking();
@@ -5390,4 +5390,5 @@ function renderSavedResults() {
 </script>
 </body>
 </html>
+
 

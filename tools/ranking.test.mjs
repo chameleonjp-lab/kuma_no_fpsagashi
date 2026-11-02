@@ -21,3 +21,14 @@ test('anonymous results also disclose failed device storage without attempting a
 test('quota and silent storage failures never send; recovery retains UUID',async()=>{for(const silent of [false,true]){let sends=0;const s=setup(async u=>{if(u.includes('submit'))sends++;return {ok:true,json:async()=>[]}});const save=s.localStorage.setItem;s.localStorage.setItem=()=>{if(!silent)throw Error('quota')};const p=s.receipts.start('A');s.api.onResultShown(4,'A',p);await tick();assert.equal(sends,0);assert.equal(p.persisted,false);const id=p.id;s.localStorage.setItem=save;await s.api.submit();assert.equal(sends,1);assert.equal(p.id,id);}});
 test('accepted alone, bare object, multiple rows and wrong names are not acknowledgements',async()=>{for(const reply of [[{accepted:true}],{accepted:true},[{accepted:true},{accepted:true}]]){const s=setup(async()=>({ok:true,json:async()=>reply}));const p=s.receipts.start('A');s.api.onResultShown(4,'A',p);await tick();assert.equal(p.status,'failed');}});
 test('malformed ranking returns retry error rather than empty success',async()=>{const s=setup(async()=>({ok:true,json:async()=>({})}));const p=s.receipts.start('');s.api.onResultShown(4,'',p);await tick();assert.ok(s.nodes.get('rankingBox').children.some(n=>n.textContent==='ランキングを取得できませんでした'));});
+
+
+const impossibleAcks={firstHigh:{result_first_score:2147483648},firstLow:{result_first_score:-2147483649},bestHigh:{result_best_score:2147483648},bestLow:{result_best_score:-2147483649},countHigh:{result_play_count:2147483648},worseBest:{result_best_score:3},worseThanFirst:{result_first_score:5}};
+for(const [label,patch] of Object.entries(impossibleAcks))test(`normal receipt ${label} stays retryable with immutable payload`,async()=>{
+ const calls=[];let invalid=true;const s=setup(async(u,o)=>{if(u.includes('submit')){calls.push(JSON.parse(o.body));return {ok:true,json:async()=>[{...ack('Alice',4)[0],...(invalid?patch:{was_duplicate:true})}]}}return {ok:true,json:async()=>[]}});
+ const p=s.receipts.start('Alice');s.receipts.finish(p,4);s.api.onResultShown(4,'Alice',p);await tick();assert.equal(p.status,'failed');assert.equal(p.score,4);
+ invalid=false;await s.api.submit();assert.equal(p.status,'sent');assert.deepEqual(calls[0],calls[1]);
+});
+for(const first of [0,-1,-2147483648])test(`normal receipt preserves legal signed historical first ${first}`,async()=>{
+ const s=setup(async u=>({ok:true,json:async()=>u.includes('submit')?[{...ack('Alice',4)[0],result_first_score:first}]:[]}));const p=s.receipts.start('Alice');s.receipts.finish(p,4);s.api.onResultShown(4,'Alice',p);await tick();assert.equal(p.status,'sent');
+});
