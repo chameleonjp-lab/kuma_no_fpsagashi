@@ -3,13 +3,13 @@ name: Validate and deploy Pages
 on:
   pull_request:
   push:
-    branches: ["claude/beautiful-allen-ub85cz"]
+    branches: ["claude/beautiful-allen-ub85cz", "codex-share-thumbnail-20261102"]
 
 permissions:
   contents: read
 
 concurrency:
-  group: pages-${{ github.event_name == 'pull_request' && github.ref || 'production' }}
+  group: pages-${{ github.event_name == 'push' && github.ref == 'refs/heads/claude/beautiful-allen-ub85cz' && 'production' || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -31,16 +31,24 @@ jobs:
       - run: npm install --no-save --package-lock=false --ignore-scripts playwright@1.62.1
       - run: node tools/browser-smoke.cjs
       - run: BROWSER_ENGINE=webkit node tools/browser-smoke.cjs
+      - run: node tools/share-capture.cjs
+      - name: Save anonymous actual-game material
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kuma-share-capture
+          path: test-results/share-capture/
+          if-no-files-found: ignore
       - name: Stage the validated public file
         run: python3 tools/check-site.py --out _site
       - name: Upload this commit's Pages artifact
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/claude/beautiful-allen-ub85cz'
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
   deploy:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/claude/beautiful-allen-ub85cz'
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 10
