@@ -1649,6 +1649,15 @@ const CONFIG = Object.freeze({
   // アイテム・罠（§6.1, §5.2）
   ITEM_MIN:         2,
   ITEM_MAX:         4,
+
+  // 2026-11: 種類数で食料が薄まらないカテゴリ抽選。その他の道具にも45%を残す。
+  FOOD_DROP_CHANCE: 0.25,
+  GEAR_DROP_CHANCE: 0.30,
+  GEAR_RECENT_TIERS: 2,
+  GEAR_RECENT_WEIGHT: 2,
+  // B22の大型獣からHPだけを調整。攻撃・防御・経験値・過剰レベル補正は維持。
+  ENEMY_HP_TUNE_FROM: 22,
+  ENEMY_HP_TUNE_RATE: 0.80,
   TRAP_MIN:         2,
   TRAP_MAX:         4,
   TRAP_PER_FLOORS:  6,
@@ -1914,6 +1923,29 @@ function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+/** 出現階で絞った種類をカテゴリ分割し、素装備の最新2段を少し出やすくする。 */
+function itemDropPools(kinds) {
+  const food = kinds.filter(k => DATA.ITEMS[k].cat === 'food');
+  const gearKinds = kinds.filter(k => ['weapon', 'shield'].includes(DATA.ITEMS[k].cat));
+  const recent = new Set();
+  for (const cat of ['weapon', 'shield']) {
+    gearKinds.filter(k => DATA.ITEMS[k].cat === cat && !DATA.ITEMS[k].effects)
+      .sort((a, b) => (DATA.ITEMS[b].minF ?? 1) - (DATA.ITEMS[a].minF ?? 1))
+      .slice(0, CONFIG.GEAR_RECENT_TIERS).forEach(k => recent.add(k));
+  }
+  const gear = gearKinds.flatMap(k => Array(recent.has(k) ? CONFIG.GEAR_RECENT_WEIGHT : 1).fill(k));
+  const other = kinds.filter(k => !['food', 'weapon', 'shield'].includes(DATA.ITEMS[k].cat));
+  return { food, gear, other };
+}
+
+/** 通常枠の抽選。B30以深の追加食料抽選とは独立。 */
+function pickFloorItem(pools) {
+  const roll = Math.random();
+  if (roll < CONFIG.FOOD_DROP_CHANCE) return pick(pools.food);
+  if (roll < CONFIG.FOOD_DROP_CHANCE + CONFIG.GEAR_DROP_CHANCE) return pick(pools.gear);
+  return pick(pools.other);
+}
+
 /** Fisher-Yatesで並べ替えた新しい配列を返す（元配列は変更しない） */
 function shuffle(arr) {
   const a = arr.slice();
@@ -2127,13 +2159,14 @@ const Dungeon = (() => {
       const d = DATA.ITEMS[k];
       return (d.minF ?? 1) <= floorNo && floorNo <= (d.maxF ?? Infinity);
     });
+    const dropPools = itemDropPools(itemKinds);
     const itemCount = floorNo >= 10 ? randInt(3, 5) : randInt(CONFIG.ITEM_MIN, CONFIG.ITEM_MAX);
     const items = [];
     const itemPool = shuffle(allFloors);
     for (const c of itemPool) {
       if (items.length >= itemCount) break;
       if (used.has(keyOf(c.x, c.y))) continue;
-      items.push({ x: c.x, y: c.y, kind: pick(itemKinds) });
+      items.push({ x: c.x, y: c.y, kind: pickFloorItem(dropPools) });
       used.add(keyOf(c.x, c.y));
     }
     // B30以降の食料は通常アイテム枠とは別枠で抽選する。
@@ -2325,6 +2358,9 @@ const Core = {
     const d = DATA.ENEMIES[kind];
     const sf = d.scaleFrom, sr = d.scaleRate; // 新規獣は専用曲線・既存はundefined（§5.2既定）
     let hp  = this.deepScale(d.hp,  floorNo, sf, sr);
+    if (floorNo >= CONFIG.ENEMY_HP_TUNE_FROM) {
+      hp = Math.max(1, Math.round(hp * CONFIG.ENEMY_HP_TUNE_RATE));
+    }
     let atk = this.deepScale(d.atk, floorNo, sf, sr);
     // 過剰レベル追いつき補正（D1）。par超過分だけ手応えを足す。
     // HPは倍率＋加算（低HP敵もワンパンされない床を作る）・攻撃は加算。
